@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Matchday
 
 A personal football viewer using Python, FastAPI, uv, and a native HTML video player.
@@ -195,5 +194,3 @@ that a stream works. No Arsenal broadcast or full-match reliability claim is imp
 References: [Streamed API](https://streamed.pk/docs), [StreamFree API](https://streamfree.top/api),
 [hls.js](https://github.com/video-dev/hls.js), [uv projects](https://docs.astral.sh/uv/guides/projects/).
 =======
-# sk_video_watch
->>>>>>> origin/main
