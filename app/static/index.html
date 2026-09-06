@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0f0f0f">
+  <title>Matchday · Your football, one place</title>
+  <link rel="icon" type="image/svg+xml" href="/static/icon.svg">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/vendor/hls.min.js" defer></script>
+  <script src="/static/player.js" defer></script>
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Matchday home"><svg class="brand-icon" viewBox="0 0 48 36" aria-hidden="true"><rect width="48" height="36" rx="11" fill="#ff3535"/><path d="M19 10 33 18 19 26Z" fill="white"/><path d="M8 7v22M5 12h6v12H5" stroke="white" fill="none" opacity=".65"/></svg><span>Matchday</span></a>
+    <input id="search" type="search" placeholder="Search teams or competition" aria-label="Search teams or competition">
+    <span class="personal">ARSENAL <strong>SINCE 2005</strong></span>
+  </header>
+  <main>
+    <section id="watch-room" class="watch" aria-labelledby="watch-title" hidden>
+      <div class="player-column">
+        <div id="screen" class="screen"></div>
+        <section class="connection" aria-labelledby="playback-title">
+          <div class="connection-heading"><h3 id="playback-title">Video health</h3><span id="video-state">Stopped</span></div>
+          <dl class="connection-readings">
+            <div><dt>Buffer ahead</dt><dd id="video-buffer">—</dd></div>
+            <div><dt>Delay behind live</dt><dd id="video-delay">—</dd></div>
+            <div><dt>Video chunk download</dt><dd id="video-segment">—</dd></div>
+            <div><dt>Buffering interruptions</dt><dd id="video-stalls">—</dd></div>
+            <div><dt>Dropped video frames</dt><dd id="video-dropped">—</dd></div>
+            <div><dt>Video request errors</dt><dd id="video-errors">—</dd></div>
+          </dl>
+          <p id="health-summary" class="health-summary" role="status">Waiting for playback measurements.</p><p class="fine-print">Green · healthy &nbsp; Amber · watch closely &nbsp; Red · needs attention. These are playback indicators, not an ISP speed test.</p>
+          <details class="connection-help"><summary>What do these numbers mean?</summary><p class="fine-print"><strong>Buffer ahead:</strong> downloaded video ready to play. Under 2 seconds is red, 2–5 seconds amber, and 5+ seconds green while playing. A low buffer increases the risk of a pause.</p><p class="fine-print"><strong>Chunk download:</strong> milliseconds to fetch a piece of video (1,000 ms = 1 second). Green means it downloaded in less than half its playback duration; red means it took longer to download than to watch.</p><p class="fine-print"><strong>Live delay:</strong> seconds behind the provider’s live edge. This stays neutral: a longer delay does not necessarily mean a bad connection and is not stadium-to-screen delay.</p><p class="fine-print"><strong>Interruptions and request errors:</strong> totals for this playback. Colors reflect current buffering or errors in the last 30 seconds, so a recovered stream can return to green. Dropped frames show a recent rendering percentage; above 1% is amber, above 5% red. Startup, pause, and seeking are not low-buffer alerts. These guides cannot identify whether a problem comes from your device, network, or provider.</p></details>
+        </section>
+      </div>
+      <div class="watch-info">
+        <p class="eyebrow">THE WATCH ROOM</p>
+        <p id="watch-provider" class="watch-provider">Provider · No match selected</p>
+        <h2 id="watch-title">Ready when you are.</h2>
+        <p id="watch-source" class="watch-source" hidden></p>
+        <p id="player-status" class="muted" role="status" aria-live="polite">Select a match to see its available players.</p>
+        <label for="source-select">Player source</label>
+        <select id="source-select" disabled><option>No match selected</option></select>
+        <div class="player-actions"><button id="reload-player" disabled>Reload player</button><button id="next-source" disabled>Next source →</button></div>
+        <a id="original" class="text-link" target="_blank" rel="noopener noreferrer" hidden>Visit provider website (may show ads) ↗</a>
+        <p class="fine-print">Video plays here without third-party page scripts. Ads already inside the broadcast may remain. Sources that cannot supply direct video will show an error.</p>
+        <button id="stop-player" class="quiet" disabled>Stop playback</button>
+      </div>
+    </section>
+    <section class="fixtures" aria-labelledby="fixtures-title">
+      <div class="section-heading"><div><p class="eyebrow">ON THE SCHEDULE</p><h2 id="fixtures-title">Find your match</h2></div><button id="refresh">Refresh listings ↻</button></div>
+      <div class="filters">
+        <div class="tabs" role="group" aria-label="Team filter"><button id="arsenal" aria-pressed="true">Arsenal</button><button id="all" aria-pressed="false">All football</button></div>
+        
+        <select id="provider" aria-label="Provider"><option value="">All providers</option><option value="streamed">Streamed</option><option value="streamfree">StreamFree</option><option value="fsl">FSL</option></select>
+      </div>
+      <div class="list-meta"><span id="result-count" role="status">Loading matches…</span><span>Kickoff times · Pacific</span></div>
+      <div id="matches" class="matches" aria-busy="true"></div>
+      <div id="provider-status" class="provider-status" aria-live="polite"></div>
+      <p class="fine-print" id="updated">Listings are cached for 60 seconds. Source availability is checked when you select a match.</p>
+    </section>
+  </main>
+  <footer><span>MATCHDAY <span class="muted">/ Independent personal viewer</span></span><span>Your football. One place.</span></footer>
+</body>
+</html>

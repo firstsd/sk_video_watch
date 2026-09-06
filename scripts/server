@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# Ubuntu systemd service management. Run from a clone as your normal user.
+set -euo pipefail
+project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+service_name=matchday.service
+
+require_user() {
+  if [[ "$EUID" -eq 0 ]]; then
+    echo 'Run this script as your normal user, without sudo. It asks for sudo only for service management.' >&2
+    exit 1
+  fi
+}
+
+prepare() {
+  if ! command -v uv >/dev/null 2>&1; then
+    echo 'Install uv first: see deploy/README.md, then reopen your shell.' >&2
+    exit 1
+  fi
+  cd -- "$project_dir"
+  uv sync --locked --no-dev
+  uv run --no-sync python -m app.setup_browser
+}
+
+case "${1:-help}" in
+  install)
+    require_user
+    if [[ ! -d /run/systemd/system ]]; then
+      echo 'This installer requires Ubuntu/Linux running systemd.' >&2
+      exit 1
+    fi
+    # Keep generated systemd directives unambiguous, including % specifiers.
+    if [[ ! "$project_dir" =~ ^/[a-zA-Z0-9_./-]+$ ]]; then
+      echo 'Clone into a path containing only letters, numbers, underscores, dots, slashes, and hyphens.' >&2
+      exit 1
+    fi
+    service_user="$(id -un)"
+    if [[ ! "$service_user" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+      echo 'Unsupported service username.' >&2
+      exit 1
+    fi
+    prepare
+    unit_file="$(mktemp)"
+    trap 'rm -f -- "$unit_file"' EXIT
+    sed -e "s|@PROJECT_DIR@|$project_dir|g" -e "s|@USER@|$service_user|g" \
+      "$project_dir/deploy/matchday.service" > "$unit_file"
+    sudo install -m 0644 "$unit_file" /etc/systemd/system/matchday.service
+    if ! sudo test -e /etc/matchday.env; then
+      sudo install -m 0600 "$project_dir/deploy/matchday.env.example" /etc/matchday.env
+    fi
+    sudo chmod 0600 /etc/matchday.env
+    echo 'Login credentials belong in /etc/matchday.env. When authentication is enabled, unconfigured login denies all access.'
+    sudo systemctl daemon-reload
+    sudo systemctl enable "$service_name"
+    sudo systemctl restart "$service_name"
+    sudo systemctl --no-pager status "$service_name"
+    echo 'Installed. Default address: http://127.0.0.1:8000 (on the server).'
+    ;;
+  update)
+    require_user
+    cd -- "$project_dir"
+    git rev-parse --is-inside-work-tree >/dev/null
+    if [[ -n "$(git status --porcelain)" ]]; then
+      echo 'The checkout has local changes. Commit or move them before updating.' >&2
+      exit 1
+    fi
+    git pull --ff-only
+    sudo systemctl stop "$service_name"
+    trap 'echo "Update failed; the service remains stopped. Fix the error, then rerun scripts/server update." >&2' ERR
+    # Install also refreshes the unit template while retaining /etc/matchday.env.
+    "$project_dir/scripts/server" install
+    ;;
+  start|stop|restart)
+    sudo systemctl "$1" "$service_name"
+    ;;
+  status)
+    sudo systemctl --no-pager status "$service_name"
+    ;;
+  logs)
+    sudo journalctl -u "$service_name" -n 100 -f
+    ;;
+  *)
+    echo 'Usage: scripts/server {install|update|start|stop|restart|status|logs}'
+    echo 'Install creates and enables the Ubuntu systemd service; logs follows its output (Ctrl+C exits logs only).'
+    ;;
+esac

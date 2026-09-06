@@ -1,0 +1,23 @@
+[Unit]
+Description=Matchday personal football viewer
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+WorkingDirectory=@PROJECT_DIR@
+Environment=MATCHDAY_HOST=127.0.0.1
+Environment=MATCHDAY_PORT=8000
+Environment=MATCHDAY_AUTH_ENABLED=true
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/etc/matchday.env
+ExecStart=@PROJECT_DIR@/.venv/bin/python -m uvicorn app.main:app --host ${MATCHDAY_HOST} --port ${MATCHDAY_PORT}
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+KillMode=control-group
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
