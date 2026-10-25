@@ -1,6 +1,6 @@
 # Matchday
 
-A personal football viewer using Python, FastAPI, uv, and a native HTML video player.
+A personal football and NBA viewer using Python, FastAPI, uv, and a native HTML video player.
 Provider pages are never embedded in the viewing browser. Python discovers an HLS stream in an
 isolated Chromium session, then relays its playlists and video data to the local player.
 
@@ -60,14 +60,14 @@ and restarting the server revokes the old credentials. See [MDN's authentication
 
 ## Watching
 
-The home page shows the schedule first. Select Arsenal or All football, choose Watch on a match
-card to reveal the player, and select a source. Source lookup has a 20-second request limit, with a
-live countdown while resolving, followed by video loading. Use the native play/fullscreen/volume
-controls.
+The home page shows the schedule first. Select Arsenal, All football, or NBA, choose Watch on a
+match card to reveal the player, and select a source. NBA listings come from Streamed's basketball
+category. Source lookup has a 20-second request limit, with a live countdown while resolving,
+followed by video loading. Use the native play/fullscreen/volume controls.
 Reload obtains a fresh media URL; Next source tries a different provider source. The provider and
 selected source remain visible in the Watch Room. Stop ends playback in the viewing browser.
-Playback keeps the playlist's initial quality variant: some providers publish variants with
-incompatible timestamps, which can freeze the video when automatic quality switching occurs.
+Playback uses adaptive quality and starts from hls.js's bandwidth estimate. The player keeps up to
+60 seconds buffered and runs a few segments behind the live edge to absorb short delivery slowdowns.
 
 The app does not load third-party player scripts, overlays, or popup code in your browser. An
 unsupported source displays an error; it never falls back to an embedded ad player. The explicitly
@@ -178,7 +178,9 @@ responses are rejected rather than forwarded as media. The relay preserves only 
 Origin, Referer, and User-Agent; it does not forward login cookies or authorization credentials.
 If a media host rejects the standard HTTP client with 403, the relay retries using curl-cffi's
 browser-compatible TLS/HTTP profile. The same destination validation and IP pinning apply, and
-the viewing browser still receives only same-origin media. No DRM or login-session support is added.
+the viewing browser still receives only same-origin media. Browser-compatible connections are
+reused between HLS chunks from the same validated host and IP instead of repeating a TLS handshake
+for every chunk. No DRM or login-session support is added.
 
 ```sh
 uv run pytest
@@ -193,4 +195,3 @@ that a stream works. No Arsenal broadcast or full-match reliability claim is imp
 
 References: [Streamed API](https://streamed.pk/docs), [StreamFree API](https://streamfree.top/api),
 [hls.js](https://github.com/video-dev/hls.js), [uv projects](https://docs.astral.sh/uv/guides/projects/).
-=======

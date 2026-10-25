@@ -83,7 +83,7 @@ async def read_public(client, url, headers, byte_range=None):
     raise ValueError("Too many media redirects")
 
 
-async def read_browser_public(url, headers, byte_range=None):
+async def read_browser_public(url, headers, byte_range=None, sessions=None):
     """Browser-compatible TLS for media hosts that reject the standard client.
 
     Each request pins its checked DNS address and disables proxy/environment
@@ -94,14 +94,25 @@ async def read_browser_public(url, headers, byte_range=None):
         if not re.fullmatch(r"bytes=\d*-\d*", byte_range):
             raise ValueError("Unsupported byte range")
         outbound["Range"] = byte_range
-    for _ in range(5):
-        ip = await public_address(url)
-        host = urlsplit(url).hostname
-        address = f"[{ip}]" if ":" in ip else ip
-        async with AsyncSession(
-            impersonate="chrome",
-            curl_options={CurlOpt.RESOLVE: [f"{host}:443:{address}"], CurlOpt.PROXY: ""},
-        ) as client:
+    owned_sessions = {} if sessions is None else None
+    pool = sessions if sessions is not None else owned_sessions
+    try:
+        for _ in range(5):
+            ip = await public_address(url)
+            host = urlsplit(url).hostname
+            address = f"[{ip}]" if ":" in ip else ip
+            key = (host, ip)
+            client = pool.get(key)
+            if client is None:
+                client = AsyncSession(
+                    impersonate="chrome",
+                    max_clients=12,
+                    curl_options={
+                        CurlOpt.RESOLVE: [f"{host}:443:{address}"],
+                        CurlOpt.PROXY: "",
+                    },
+                )
+                pool[key] = client
             response = await client.get(
                 url, headers=outbound, timeout=15, allow_redirects=False, stream=True
             )
@@ -118,7 +129,12 @@ async def read_browser_public(url, headers, byte_range=None):
                 return bytes(data), url, response.status_code, response.headers
             finally:
                 await response.aclose()
-    raise ValueError("Too many media redirects")
+        raise ValueError("Too many media redirects")
+    finally:
+        if owned_sessions:
+            await asyncio.gather(
+                *(client.close() for client in owned_sessions.values()), return_exceptions=True
+            )
 
 
 @dataclass
@@ -163,6 +179,7 @@ class MediaService:
         self.playbacks = {}
         self.automation = None
         self.browser = None
+        self.browser_clients = {}
         self.client = httpx.AsyncClient(timeout=15, follow_redirects=False, trust_env=False)
 
     async def close(self):
@@ -172,6 +189,11 @@ class MediaService:
         if self.automation:
             with suppress(Exception):
                 await self.automation.stop()
+        if self.browser_clients:
+            await asyncio.gather(
+                *(client.close() for client in self.browser_clients.values()),
+                return_exceptions=True,
+            )
         await self.client.aclose()
 
     async def discover(self, source):
@@ -294,7 +316,9 @@ class MediaService:
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code != 403:
                     raise
-                body, final_url, _, _ = await read_browser_public(url, headers)
+                body, final_url, _, _ = await read_browser_public(
+                    url, headers, sessions=self.browser_clients
+                )
                 browser_http = True
             playback = Playback(secrets.token_urlsafe(24), headers, browser_http=browser_http)
             playback.playlist(body.decode("utf-8-sig"), final_url)
@@ -321,7 +345,7 @@ class MediaService:
         try:
             if playback.browser_http:
                 body, final_url, status, headers = await read_browser_public(
-                    url, playback.headers, byte_range
+                    url, playback.headers, byte_range, self.browser_clients
                 )
             else:
                 body, final_url, status, headers = await read_public(

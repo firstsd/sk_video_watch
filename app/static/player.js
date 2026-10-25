@@ -129,14 +129,20 @@ class DirectPlayer {
       if (this.video === video) this.text('player-status', 'Video ready. Press play to start.');
     });
     if (window.Hls?.isSupported()) {
-      const hls = new Hls({enableWorker: true, maxBufferLength: 30});
+      const hls = new Hls({
+        enableWorker: true,
+        startLevel: -1,
+        capLevelToPlayerSize: true,
+        maxBufferLength: 60,
+        maxMaxBufferLength: 120,
+        backBufferLength: 30,
+        liveSyncDurationCount: 5,
+        liveMaxLatencyDurationCount: 10,
+      });
       this.hls = hls;
       // Recovery also attaches media; reloading here would discard its resume position.
       hls.once(Hls.Events.MEDIA_ATTACHED, () => hls.loadSource(url));
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        // Some providers advertise variants whose segment timelines do not align.
-        // Keep the initial rendition instead of switching into an incompatible clock.
-        hls.loadLevel = hls.firstLevel;
         attemptPlay();
       });
       hls.on(Hls.Events.FRAG_LOADED, (_, data) => {

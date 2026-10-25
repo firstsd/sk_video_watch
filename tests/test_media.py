@@ -150,6 +150,9 @@ def test_browser_relay_pins_dns_disables_proxies_and_rechecks_redirect(monkeypat
         async def __aexit__(self, *args):
             pass
 
+        async def close(self):
+            pass
+
         async def get(self, url, **options):
             assert options["allow_redirects"] is False
             return Redirect()
@@ -161,6 +164,50 @@ def test_browser_relay_pins_dns_disables_proxies_and_rechecks_redirect(monkeypat
         with pytest.raises(ValueError):
             await read_browser_public("https://video.example/main.m3u8", {})
         assert seen == ["https://video.example/main.m3u8", "https://internal.example/private"]
+
+    asyncio.run(scenario())
+
+
+def test_browser_relay_reuses_a_pinned_session_for_media_chunks(monkeypatch):
+    created = []
+
+    async def address(url):
+        return "93.184.215.14"
+
+    class Response:
+        def __init__(self):
+            self.status_code = 200
+            self.headers = {"content-type": "video/mp2t"}
+
+        def raise_for_status(self):
+            pass
+
+        async def aiter_content(self):
+            yield b"video"
+
+        async def aclose(self):
+            pass
+
+    class Session:
+        def __init__(self, **options):
+            created.append(options)
+
+        async def get(self, url, **options):
+            return Response()
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr("app.media.public_address", address)
+    monkeypatch.setattr("app.media.AsyncSession", Session)
+
+    async def scenario():
+        sessions = {}
+        first = await read_browser_public("https://video.example/one.ts", {}, sessions=sessions)
+        second = await read_browser_public("https://video.example/two.ts", {}, sessions=sessions)
+        assert first[0] == second[0] == b"video"
+        assert len(created) == 1
+        assert list(sessions) == [("video.example", "93.184.215.14")]
 
     asyncio.run(scenario())
 

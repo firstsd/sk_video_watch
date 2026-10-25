@@ -51,10 +51,11 @@ def timestamp(value, divisor=1):
         return None
 
 
-def event(provider, identifier, title, starts_at, league="", **extra):
+def event(provider, identifier, title, starts_at, league="", sport="football", **extra):
     return {
-        "id": hashlib.sha256(f"{provider}:{identifier}".encode()).hexdigest()[:24],
+        "id": hashlib.sha256(f"{provider}:{sport}:{identifier}".encode()).hexdigest()[:24],
         "provider": provider,
+        "sport": sport,
         "title": str(title),
         "starts_at": starts_at,
         "league": str(league or "Football"),
@@ -63,7 +64,7 @@ def event(provider, identifier, title, starts_at, league="", **extra):
     }
 
 
-def parse_streamed(data):
+def parse_streamed(data, sport="football"):
     if not isinstance(data, list):
         raise TypeError("Unexpected match response")
     return [
@@ -72,13 +73,16 @@ def parse_streamed(data):
             row["id"],
             row["title"],
             timestamp(row.get("date"), 1000),
+            "NBA" if sport == "basketball" else "Football",
+            sport=sport,
             sources=row.get("sources") or [],
+            page_url=f"https://streamed.pk/category/{sport}",
         )
         for row in data
         if isinstance(row, dict)
         and row.get("id")
         and row.get("title")
-        and row.get("category", "football") == "football"
+        and row.get("category", sport) == sport
     ]
 
 
@@ -178,7 +182,18 @@ def failure(exc):
 
 async def load_provider(client, provider):
     if provider == "streamed":
-        return parse_streamed(await fetch(client, "https://streamed.pk/api/matches/football"))
+        results = await asyncio.gather(
+            fetch(client, "https://streamed.pk/api/matches/football"),
+            fetch(client, "https://streamed.pk/api/matches/basketball"),
+            return_exceptions=True,
+        )
+        rows = []
+        for sport, result in zip(("football", "basketball"), results):
+            if not isinstance(result, Exception):
+                rows.extend(parse_streamed(result, sport))
+        if not rows and all(isinstance(result, Exception) for result in results):
+            raise results[0]
+        return rows
     if provider == "streamfree":
         return parse_streamfree(
             await fetch(client, "https://streamfree.top/api/v1/streams?category=soccer")

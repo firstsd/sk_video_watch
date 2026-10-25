@@ -64,6 +64,24 @@ def test_providers_normalize_seconds_and_milliseconds():
     assert streamed[0]["id"] != streamfree[0]["id"]
 
 
+def test_streamed_basketball_is_labeled_for_nba_view():
+    rows = parse_streamed(
+        [
+            {
+                "id": "nba-one",
+                "title": "Seattle SuperSonics vs Portland Trail Blazers",
+                "category": "basketball",
+                "date": 1792888200000,
+                "sources": [{"source": "hotel", "id": "nba-one"}],
+            }
+        ],
+        "basketball",
+    )
+    assert rows[0]["sport"] == "basketball"
+    assert rows[0]["league"] == "NBA"
+    assert rows[0]["page_url"] == "https://streamed.pk/category/basketball"
+
+
 def test_fsl_extracts_matches_and_only_known_channel_host():
     rows = parse_fsl("""<table><tbody id="myTable"><tr id="match" data-timestamp="1788607800000">
       <td class="leaguename">FA Cup</td><td class="event-title">Arsenal vs Chelsea</td>
@@ -108,6 +126,8 @@ def test_catalog_partial_failure_and_cache():
     def handler(request):
         calls.append(str(request.url))
         if request.url.host == "streamed.pk":
+            if request.url.path.endswith("/basketball"):
+                return httpx.Response(200, json=[])
             return httpx.Response(
                 200, json=[{"id": "one", "title": "Arsenal vs Chelsea", "sources": []}]
             )
@@ -123,7 +143,7 @@ def test_catalog_partial_failure_and_cache():
             assert len(first["matches"]) == 1
             assert first["providers"][1]["error"] == "Provider returned HTTP 503"
             assert "sources" not in first["matches"][0]
-            assert len(calls) == 3
+            assert len(calls) == 4
 
     run(scenario())
 

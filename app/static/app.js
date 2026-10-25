@@ -1,6 +1,6 @@
 const $ = (id) => document.getElementById(id);
 const names = {streamed: 'Streamed', streamfree: 'StreamFree', fsl: 'FSL'};
-let matches = [], arsenalOnly = true, selected = null, sources = [], sourceIndex = 0;
+let matches = [], sportView = 'arsenal', selected = null, sources = [], sourceIndex = 0;
 let selectionRequest = 0, listingRequest = 0;
 let playbackRequest = 0;
 let resolvingVideo = null;
@@ -27,18 +27,20 @@ async function getJSON(url) {
 function renderMatches() {
   const search = $('search').value.trim().toLowerCase();
   const provider = $('provider').value;
-  const filtered = matches.filter(m => (!arsenalOnly || /\barsenal\b/i.test(m.title)) &&
+  const filtered = matches.filter(m =>
+    (sportView === 'arsenal' ? m.sport === 'football' && /\barsenal\b/i.test(m.title)
+      : sportView === 'nba' ? m.sport === 'basketball' : m.sport === 'football') &&
     (!provider || m.provider === provider) && `${m.title} ${m.league}`.toLowerCase().includes(search));
   $('matches').replaceChildren();
   $('result-count').textContent = `${filtered.length} listing${filtered.length === 1 ? '' : 's'} · availability varies by source`;
   if (!filtered.length) {
-    const box = element('div', 'empty', arsenalOnly
+    const box = element('div', 'empty', sportView === 'arsenal'
       ? 'No Arsenal matches in the current provider listings. These feeds are not a complete season schedule.'
-      : 'No matches found. Try another filter or check the provider status below.');
-    if (arsenalOnly) {
+      : `No ${sportView === 'nba' ? 'NBA games' : 'football matches'} found. Try another filter or check the provider status below.`);
+    if (sportView === 'arsenal') {
       box.append(element('br'));
       const button = element('button', '', 'Browse all football');
-      button.addEventListener('click', () => setTeam(false));
+      button.addEventListener('click', () => setSport('football'));
       box.append(button);
     }
     $('matches').append(box);
@@ -55,7 +57,7 @@ function renderMatches() {
     const watch = element('button', '', selected?.id === match.id ? 'Selected' : 'Watch →');
     watch.setAttribute('aria-label', `Watch ${match.title} on ${names[match.provider]}`);
     watch.addEventListener('click', () => selectMatch(match));
-    const thumbnail = element('div', `match-art art-${match.provider}`);
+    const thumbnail = element('div', `match-art art-${match.sport}`);
     thumbnail.setAttribute('aria-hidden', 'true');
     thumbnail.append(element('span', 'art-league', match.league || 'FOOTBALL'), element('span', 'art-play', '▶'), element('span', 'art-provider', names[match.provider]));
     row.append(thumbnail, kickoff, details, element('span', 'provider-name', names[match.provider]), watch);
@@ -63,10 +65,11 @@ function renderMatches() {
   }
 }
 
-function setTeam(only) {
-  arsenalOnly = only;
-  $('arsenal').setAttribute('aria-pressed', String(only));
-  $('all').setAttribute('aria-pressed', String(!only));
+function setSport(view) {
+  sportView = view;
+  $('arsenal').setAttribute('aria-pressed', String(view === 'arsenal'));
+  $('football').setAttribute('aria-pressed', String(view === 'football'));
+  $('nba').setAttribute('aria-pressed', String(view === 'nba'));
   renderMatches();
 }
 
@@ -211,8 +214,9 @@ async function playSource() {
   }
 }
 
-$('arsenal').addEventListener('click', () => setTeam(true));
-$('all').addEventListener('click', () => setTeam(false));
+$('arsenal').addEventListener('click', () => setSport('arsenal'));
+$('football').addEventListener('click', () => setSport('football'));
+$('nba').addEventListener('click', () => setSport('nba'));
 $('search').addEventListener('input', renderMatches);
 $('provider').addEventListener('change', renderMatches);
 $('refresh').addEventListener('click', loadMatches);

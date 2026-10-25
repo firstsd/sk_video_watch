@@ -24,7 +24,7 @@ class Hls {
   static Events = {MEDIA_ATTACHED: 'attached', MANIFEST_PARSED: 'manifest', FRAG_LOADED: 'fragment', ERROR: 'error'};
   static ErrorTypes = {NETWORK_ERROR: 'networkError', MEDIA_ERROR: 'mediaError'};
   static isSupported() { return true; }
-  constructor() { this.events = {}; this.loads = []; this.starts = []; }
+  constructor(options) { this.options = options; this.events = {}; this.loads = []; this.starts = []; }
   on(event, fn) { (this.events[event] ||= []).push(fn); }
   once(event, fn) {
     this.on(event, (...args) => {
@@ -62,7 +62,11 @@ test('media recovery preserves the existing source and does not prematurely paus
   const hls = player.hls;
   hls.firstLevel = 1;
   hls.emit(Hls.Events.MANIFEST_PARSED);
-  assert.equal(hls.loadLevel, 1);
+  assert.equal(hls.loadLevel, undefined);
+  assert.equal(hls.options.startLevel, -1);
+  assert.equal(hls.options.capLevelToPlayerSize, true);
+  assert.equal(hls.options.maxBufferLength, 60);
+  assert.equal(hls.options.liveSyncDurationCount, 5);
   player.video.dispatchEvent(new Event('error'));
   assert.equal(player.video.paused, false);
   hls.emit(Hls.Events.ERROR, {type: Hls.ErrorTypes.MEDIA_ERROR, details: 'bufferAppendError', fatal: true});
