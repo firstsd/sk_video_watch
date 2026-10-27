@@ -7,7 +7,7 @@ import asyncio
 import hashlib
 import ipaddress
 import math
-from urllib.parse import quote, urljoin, urlsplit
+from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlsplit, urlunsplit
 
 import httpx
 from bs4 import BeautifulSoup
@@ -250,7 +250,26 @@ async def resolve(client, match):
             for i, source in enumerate(data["sources"], 1):
                 url = public_https(source)
                 if url:
-                    streams.append({"url": url, "label": f"StreamFree · Source {i}"})
+                    stream = {"url": url, "label": f"StreamFree · Source {i}"}
+                    parts = urlsplit(url)
+                    page = urlsplit(match["page_url"])
+                    # StreamFree's own page uses same-mirror embeds with autoplay.
+                    # The API can still advertise embeds on a different mirror.
+                    if parts.hostname in (
+                        "strmfree.st",
+                        "streamfree.top",
+                    ) and parts.path.startswith("/embed/"):
+                        query = [
+                            item
+                            for item in parse_qsl(parts.query, keep_blank_values=True)
+                            if item[0] != "autostart"
+                        ]
+                        query.append(("autostart", "1"))
+                        stream["discovery_url"] = urlunsplit(
+                            (page.scheme, page.netloc, parts.path, urlencode(query), "")
+                        )
+                        stream["discovery_referer"] = match["page_url"]
+                    streams.append(stream)
         elif provider == "fsl" and isinstance(data, str):
             for stream in parse_frames(data, label["url"], label["label"]):
                 stream["discovery_url"] = label["url"]

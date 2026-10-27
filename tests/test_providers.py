@@ -189,3 +189,41 @@ def test_streamfree_with_no_live_sources_does_not_invent_a_player():
             assert (await resolve(client, match))["streams"] == []
 
     run(scenario())
+
+
+def test_streamfree_uses_own_mirror_and_autoplay_for_discovery():
+    async def scenario():
+        match = parse_streamfree(
+            {
+                "streams": [
+                    {
+                        "name": "Arsenal vs Fleetwood Town",
+                        "stream_key": "arsenal-vs-fleetwood-town",
+                        "category": "soccer",
+                    }
+                ]
+            }
+        )[0]
+        embeds = [
+            "https://strmfree.st/embed/soccer/arsenal-vs-fleetwood-town1080p",
+            "https://strmfree.st/embed/soccer/arsenal-vs-fleetwood-town1080p2?token=one&token=two&autostart=0",
+            "https://external.example/watch",
+            "https://127.0.0.1/private",
+        ]
+        transport = httpx.MockTransport(
+            lambda request: httpx.Response(200, json={"sources": embeds})
+        )
+        async with httpx.AsyncClient(transport=transport) as client:
+            data = await resolve(client, match)
+        first, second, external = data["streams"]
+        assert first["url"] == embeds[0]
+        assert first["discovery_url"] == (
+            "https://streamfree.top/embed/soccer/arsenal-vs-fleetwood-town1080p?autostart=1"
+        )
+        assert first["discovery_referer"] == match["page_url"]
+        assert second["discovery_url"].endswith("?token=one&token=two&autostart=1")
+        assert external["url"] == embeds[2]
+        assert "discovery_url" not in external
+        assert data["warnings"] == []
+
+    run(scenario())

@@ -18,7 +18,9 @@ from app.media import browser_environment
 
 def check_browser():
     with sync_playwright() as automation:
-        browser = automation.chromium.launch(headless=True, env=browser_environment())
+        browser = automation.chromium.launch(
+            channel="chromium", headless=True, env=browser_environment()
+        )
         browser.close()
 
 

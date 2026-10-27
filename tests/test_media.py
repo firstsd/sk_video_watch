@@ -212,7 +212,7 @@ def test_browser_relay_reuses_a_pinned_session_for_media_chunks(monkeypatch):
     asyncio.run(scenario())
 
 
-def test_browser_cleanup_timeout_releases_discovery_lock(monkeypatch):
+def test_full_browser_and_cleanup_timeout_release_discovery_lock(monkeypatch):
     original_timeout = asyncio.timeout
 
     class Response:
@@ -237,6 +237,9 @@ def test_browser_cleanup_timeout_releases_discovery_lock(monkeypatch):
             self.callback = callback
 
         async def goto(self, *args, **kwargs):
+            assert args == ("https://video.example/main.m3u8?autostart=1",)
+            assert kwargs["referer"] == "https://video.example/player"
+            assert kwargs["wait_until"] == "commit"
             self.callback(response)
 
     class Context:
@@ -265,6 +268,19 @@ def test_browser_cleanup_timeout_releases_discovery_lock(monkeypatch):
         async def close(self):
             pass
 
+    class Launcher:
+        async def launch(self, **options):
+            assert options["channel"] == "chromium"
+            assert options["headless"] is True
+            return Browser()
+
+    class Automation:
+        def __init__(self):
+            self.chromium = Launcher()
+
+        async def stop(self):
+            pass
+
     # Shorten cleanup's deadline while retaining the overall discovery deadline.
     monkeypatch.setattr(
         asyncio, "timeout", lambda delay: original_timeout(0.01 if delay == 3 else delay)
@@ -272,10 +288,16 @@ def test_browser_cleanup_timeout_releases_discovery_lock(monkeypatch):
 
     async def scenario():
         service = MediaService()
-        service.browser = Browser()
+        service.automation = Automation()
         try:
             for _ in range(2):
-                url, _ = await service.discover({"url": "https://video.example/player"})
+                url, _ = await service.discover(
+                    {
+                        "url": "https://video.example/embed",
+                        "discovery_url": "https://video.example/main.m3u8?autostart=1",
+                        "discovery_referer": "https://video.example/player",
+                    }
+                )
                 assert url == response.url
                 assert not service.lock.locked()
         finally:

@@ -24,6 +24,10 @@ uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 Open **http://127.0.0.1:8000** in Chrome. Python 3.12+ is required; uv can install Python if needed.
 The browser setup is a one-time step for video discovery. It also verifies that Chromium can launch.
+Discovery uses full Chromium in headless mode, including its built-in PDF support; the lightweight
+headless shell can incorrectly trigger player compatibility checks. StreamFree embeds use the
+current page's mirror, referrer, and autoplay setting so discovery starts the same way as its player.
+Its advertising script and ad iframe are skipped during discovery to avoid delaying video startup.
 On minimal Debian/Ubuntu hosts it can extract commonly missing libraries into `.runtime/` without
 sudo. These files stay on the Python host, are ignored by Git, and are used only by the discovery
 browser. It is separate from the browser you use to watch. If your host needs additional system libraries:

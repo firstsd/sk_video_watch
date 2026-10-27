@@ -216,7 +216,7 @@ class MediaService:
                     if not self.automation:
                         self.automation = await async_playwright().start()
                     self.browser = await self.automation.chromium.launch(
-                        headless=True, env=browser_environment()
+                        channel="chromium", headless=True, env=browser_environment()
                     )
             except BrowserError as exc:
                 raise HTTPException(
@@ -236,14 +236,18 @@ class MediaService:
                     if not public_https(url):
                         await route.abort()
                         return
-                    host = urlsplit(url).hostname
+                    destination = urlsplit(url)
+                    host = destination.hostname
+                    if route.request.resource_type in ("image", "font") or (
+                        host in ("streamfree.top", "strmfree.st")
+                        and destination.path in ("/analytics.js", "/ad.html")
+                    ):
+                        await route.abort()
+                        return
                     if host not in checked_hosts:
                         await public_address(url)
                         checked_hosts.add(host)
-                    if route.request.resource_type in ("image", "font"):
-                        await route.abort()
-                    else:
-                        await route.continue_()
+                    await route.continue_()
                 except (ValueError, OSError, BrowserError):
                     try:
                         await route.abort()
@@ -287,7 +291,12 @@ class MediaService:
                 )
                 url = source.get("discovery_url", source["url"])
                 try:
-                    await page.goto(url, wait_until="domcontentloaded", timeout=12000)
+                    await page.goto(
+                        url,
+                        referer=source.get("discovery_referer"),
+                        wait_until="commit",
+                        timeout=12000,
+                    )
                 except BrowserError:
                     pass
                 try:
