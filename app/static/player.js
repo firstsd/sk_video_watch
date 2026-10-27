@@ -133,11 +133,11 @@ class DirectPlayer {
         enableWorker: true,
         startLevel: -1,
         capLevelToPlayerSize: true,
-        maxBufferLength: 60,
+        maxBufferLength: 120,
         maxMaxBufferLength: 120,
         backBufferLength: 30,
-        liveSyncDurationCount: 5,
-        liveMaxLatencyDurationCount: 10,
+        liveSyncDurationCount: 10,
+        liveMaxLatencyDurationCount: 20,
       });
       this.hls = hls;
       // Recovery also attaches media; reloading here would discard its resume position.

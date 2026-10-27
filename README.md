@@ -70,8 +70,10 @@ category. Source lookup has a 20-second request limit, with a live countdown whi
 followed by video loading. Use the native play/fullscreen/volume controls.
 Reload obtains a fresh media URL; Next source tries a different provider source. The provider and
 selected source remain visible in the Watch Room. Stop ends playback in the viewing browser.
-Playback uses adaptive quality and starts from hls.js's bandwidth estimate. The player keeps up to
-60 seconds buffered and runs a few segments behind the live edge to absorb short delivery slowdowns.
+Playback uses adaptive quality and starts from hls.js's bandwidth estimate. The player targets
+10 segments behind the live edge and up to 120 seconds of forward buffer, subject to the source's
+playlist window and browser memory limits. It catches up if the delay exceeds 20 segments. Actual
+delay depends on segment duration; these settings favor smooth playback over staying close to live.
 
 The app does not load third-party player scripts, overlays, or popup code in your browser. An
 unsupported source displays an error; it never falls back to an embedded ad player. The explicitly

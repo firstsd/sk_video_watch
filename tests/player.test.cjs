@@ -65,8 +65,9 @@ test('media recovery preserves the existing source and does not prematurely paus
   assert.equal(hls.loadLevel, undefined);
   assert.equal(hls.options.startLevel, -1);
   assert.equal(hls.options.capLevelToPlayerSize, true);
-  assert.equal(hls.options.maxBufferLength, 60);
-  assert.equal(hls.options.liveSyncDurationCount, 5);
+  assert.equal(hls.options.maxBufferLength, 120);
+  assert.equal(hls.options.liveSyncDurationCount, 10);
+  assert.equal(hls.options.liveMaxLatencyDurationCount, 20);
   player.video.dispatchEvent(new Event('error'));
   assert.equal(player.video.paused, false);
   hls.emit(Hls.Events.ERROR, {type: Hls.ErrorTypes.MEDIA_ERROR, details: 'bufferAppendError', fatal: true});
