@@ -82,6 +82,88 @@ def test_streamed_basketball_is_labeled_for_nba_view():
     assert rows[0]["page_url"] == "https://streamed.pk/category/basketball"
 
 
+def test_streamfree_mixed_feed_keeps_soccer_and_basketball_separate():
+    rows = parse_streamfree(
+        {
+            "streams": [
+                {
+                    "stream_key": "shared-key",
+                    "name": "Arsenal vs Chelsea",
+                    "category": "soccer",
+                },
+                {
+                    "stream_key": "shared-key",
+                    "name": "Miami Heat vs Atlanta Hawks",
+                    "category": "basketball",
+                    "match_timestamp": 1793228400,
+                },
+                {"stream_key": "nfl", "name": "NFL game", "category": "football"},
+                {"stream_key": "nhl", "name": "NHL game", "category": "hockey"},
+            ]
+        }
+    )
+    soccer, basketball = rows
+    assert soccer["sport"] == "football"
+    assert soccer["page_url"] == "https://streamfree.top/player/soccer/shared-key"
+    assert basketball["sport"] == "basketball"
+    assert basketball["league"] == "NBA"
+    assert basketball["starts_at"] == 1793228400
+    assert basketball["page_url"] == "https://streamfree.top/player/basketball/shared-key"
+    assert soccer["id"] != basketball["id"]
+
+
+def test_catalog_loads_streamfree_basketball_and_resolves_its_player():
+    key = "miami-heat-vs-atlanta-hawks"
+    embed = f"https://strmfree.st/embed/basketball/{key}1080p"
+    calls = []
+
+    def handler(request):
+        calls.append(str(request.url))
+        if request.url.host == "streamed.pk":
+            return httpx.Response(301, headers={"Location": "https://streamed.pk/"})
+        if request.url.host == "streamfree.top":
+            if request.url.path == "/api/v1/streams":
+                assert not request.url.query
+                return httpx.Response(
+                    200,
+                    json={
+                        "streams": [
+                            {
+                                "stream_key": key,
+                                "name": "Miami Heat vs Atlanta Hawks",
+                                "category": "basketball",
+                                "league": "NBA",
+                            }
+                        ]
+                    },
+                )
+            assert request.url.path == f"/api/v1/sources/{key}"
+            return httpx.Response(200, json={"sources": [embed]})
+        return httpx.Response(200, text='<table><tbody id="myTable"></tbody></table>')
+
+    async def scenario():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            catalog = Catalog(client)
+            listing = await catalog.listing()
+            assert len(listing["matches"]) == 1
+            match = listing["matches"][0]
+            assert match["sport"] == "basketball"
+            assert match["league"] == "NBA"
+            assert listing["providers"][0]["error"] == "Provider returned HTTP 301"
+            assert listing["providers"][1]["count"] == 1
+            source = (await catalog.streams(match["id"]))["streams"][0]
+            assert source["url"] == embed
+            assert source["discovery_url"] == (
+                f"https://streamfree.top/embed/basketball/{key}1080p?autostart=1"
+            )
+            assert source["discovery_referer"] == (
+                f"https://streamfree.top/player/basketball/{key}"
+            )
+            assert len(calls) == 5
+
+    run(scenario())
+
+
 def test_fsl_extracts_matches_and_only_known_channel_host():
     rows = parse_fsl("""<table><tbody id="myTable"><tr id="match" data-timestamp="1788607800000">
       <td class="leaguename">FA Cup</td><td class="event-title">Arsenal vs Chelsea</td>

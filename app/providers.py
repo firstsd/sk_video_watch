@@ -93,7 +93,9 @@ def parse_streamfree(data):
     for row in data["streams"]:
         if not isinstance(row, dict) or not row.get("stream_key") or not row.get("name"):
             continue
-        if row.get("category") != "soccer":
+        category = row.get("category")
+        sport = {"soccer": "football", "basketball": "basketball"}.get(category)
+        if sport is None:
             continue
         key = str(row["stream_key"])
         result.append(
@@ -102,9 +104,10 @@ def parse_streamfree(data):
                 key,
                 row["name"],
                 timestamp(row.get("match_timestamp")),
-                row.get("league"),
+                row.get("league") or ("NBA" if sport == "basketball" else "Football"),
+                sport=sport,
                 key=key,
-                page_url=f"https://streamfree.top/player/soccer/{quote(key, safe='')}",
+                page_url=f"https://streamfree.top/player/{category}/{quote(key, safe='')}",
             )
         )
     return result
@@ -195,9 +198,7 @@ async def load_provider(client, provider):
             raise results[0]
         return rows
     if provider == "streamfree":
-        return parse_streamfree(
-            await fetch(client, "https://streamfree.top/api/v1/streams?category=soccer")
-        )
+        return parse_streamfree(await fetch(client, "https://streamfree.top/api/v1/streams"))
     return parse_fsl(await fetch(client, PROVIDERS["fsl"], as_json=False))
 
 

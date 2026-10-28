@@ -68,8 +68,10 @@ and restarting the server revokes the old credentials. See [MDN's authentication
 ## Watching
 
 The home page shows the schedule first. Select Arsenal, All football, or NBA, choose Watch on a
-match card to reveal the player, and select a source. NBA listings come from Streamed's basketball
-category. Source lookup has a 20-second request limit, with a live countdown while resolving,
+match card to reveal the player, and select a source. StreamFree's listing feed supplies both soccer
+and basketball; basketball games appear in the NBA tab. The Streamed basketball adapter remains,
+but streamed.pk currently displays a closure notice and its listing endpoints redirect to the
+homepage. Source lookup has a 20-second request limit, with a live countdown while resolving,
 followed by video loading. Use the native play/fullscreen/volume controls.
 Reload obtains a fresh media URL; Next source tries a different provider source. The provider and
 selected source remain visible in the Watch Room. Stop ends playback in the viewing browser.
