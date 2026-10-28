@@ -131,6 +131,8 @@ class DirectPlayer {
     if (window.Hls?.isSupported()) {
       const hls = new Hls({
         enableWorker: true,
+        progressive: true,
+        lowLatencyMode: false,
         startLevel: -1,
         capLevelToPlayerSize: true,
         maxBufferLength: 120,

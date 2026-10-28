@@ -63,6 +63,8 @@ test('media recovery preserves the existing source and does not prematurely paus
   hls.firstLevel = 1;
   hls.emit(Hls.Events.MANIFEST_PARSED);
   assert.equal(hls.loadLevel, undefined);
+  assert.equal(hls.options.progressive, true);
+  assert.equal(hls.options.lowLatencyMode, false);
   assert.equal(hls.options.startLevel, -1);
   assert.equal(hls.options.capLevelToPlayerSize, true);
   assert.equal(hls.options.maxBufferLength, 120);

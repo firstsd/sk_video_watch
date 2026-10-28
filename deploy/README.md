@@ -1,4 +1,16 @@
-# Git and Ubuntu deployment
+# Deployment models
+
+| Host | Deployment model | Guide |
+| --- | --- | --- |
+| Ubuntu | Native Python/uv + system systemd service | [Ubuntu](ubuntu.md) |
+| AlmaLinux/RHEL 9 | Rootless Podman + user systemd/Quadlet | [AlmaLinux](almalinux.md) |
+
+Both use the same application, player, and streaming settings. Ubuntu runs directly on the host;
+the AlmaLinux model provides the browser's supported Debian userspace in a container. For WSL on
+your work laptop, read [Windows OpenVPN routing and laptop availability](wsl-vpn.md). Neither model
+changes VPN routes or keeps a powered-off/sleeping laptop available.
+
+## Git and native Ubuntu deployment
 
 The repository includes `scripts/server`, which installs a systemd service called **matchday**.
 It runs as the normal Ubuntu account that installed it, starts at boot, and restarts after crashes.

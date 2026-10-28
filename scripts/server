@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ubuntu systemd service management. Run from a clone as your normal user.
+# Native Ubuntu systemd service management. Run from a clone as your normal user.
 set -euo pipefail
 project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 service_name=matchday.service
@@ -25,7 +25,7 @@ case "${1:-help}" in
   install)
     require_user
     if [[ ! -d /run/systemd/system ]]; then
-      echo 'This installer requires Ubuntu/Linux running systemd.' >&2
+      echo 'This installer requires Linux running systemd. See deploy/ubuntu.md for WSL setup.' >&2
       exit 1
     fi
     # Keep generated systemd directives unambiguous, including % specifiers.

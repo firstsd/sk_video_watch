@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# Rootless Podman + user systemd management for AlmaLinux/RHEL 9.
+set -euo pipefail
+project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+service_name=matchday.service
+config_dir="$HOME/.config/matchday"
+quadlet_dir="$HOME/.config/containers/systemd"
+
+require_user() {
+  if [[ "$EUID" -eq 0 ]]; then
+    echo 'Run this script as your normal user, without sudo.' >&2
+    exit 1
+  fi
+}
+
+require_runtime() {
+  require_user
+  if ! command -v podman >/dev/null 2>&1; then
+    echo 'Install Podman first: see deploy/almalinux.md.' >&2
+    exit 1
+  fi
+  if [[ "$(podman info --format '{{.Host.CgroupsVersion}}')" != v2 ]]; then
+    echo 'Quadlet requires cgroup v2. See deploy/almalinux.md.' >&2
+    exit 1
+  fi
+  if ! systemctl --user show-environment >/dev/null 2>&1; then
+    echo 'The user systemd manager is unavailable. See the WSL/systemd steps in deploy/almalinux.md.' >&2
+    exit 1
+  fi
+}
+
+build_image() {
+  podman build --tag localhost/matchday:latest \
+    --file "$project_dir/deploy/Containerfile" "$project_dir"
+}
+
+case "${1:-help}" in
+  install)
+    require_runtime
+    build_image
+    mkdir -p -- "$config_dir" "$quadlet_dir"
+    chmod 700 "$config_dir"
+    if [[ ! -e "$config_dir/matchday.env" ]]; then
+      install -m 0600 "$project_dir/deploy/matchday-podman.env.example" "$config_dir/matchday.env"
+    fi
+    chmod 600 "$config_dir/matchday.env"
+    if [[ ! -e "$quadlet_dir/matchday.container" ]]; then
+      install -m 0644 "$project_dir/deploy/matchday.container" "$quadlet_dir/matchday.container"
+    fi
+    systemctl --user daemon-reload
+    if ! systemctl --user cat "$service_name" >/dev/null 2>&1; then
+      echo 'Quadlet did not generate matchday.service. Install a current Podman with Quadlet support; see deploy/almalinux.md.' >&2
+      exit 1
+    fi
+    systemctl --user restart "$service_name"
+    systemctl --user --no-pager status "$service_name"
+    echo "Installed. Configure login in $config_dir/matchday.env, then restart."
+    echo 'Default address: http://127.0.0.1:8000'
+    ;;
+  update)
+    require_runtime
+    cd -- "$project_dir"
+    git rev-parse --is-inside-work-tree >/dev/null
+    if [[ -n "$(git status --porcelain)" ]]; then
+      echo 'The checkout has local changes. Commit or move them before updating.' >&2
+      exit 1
+    fi
+    git pull --ff-only
+    # Build while the old image keeps serving; a failed build leaves it running.
+    build_image
+    systemctl --user daemon-reload
+    systemctl --user restart "$service_name"
+    echo 'Updated. Existing environment and Quadlet configuration were preserved.'
+    ;;
+  build)
+    require_runtime
+    build_image
+    ;;
+  start|stop|restart|status)
+    require_user
+    systemctl --user "${1}" "$service_name"
+    ;;
+  logs)
+    require_user
+    journalctl --user -u "$service_name" -n 100 -f
+    ;;
+  check)
+    require_user
+    shift
+    podman exec matchday /app/.venv/bin/python -m app.check_streamfree "$@"
+    ;;
+  *)
+    echo 'Usage: bash scripts/server-podman {install|update|build|start|stop|restart|status|logs}'
+    echo 'Stream timing: bash scripts/server-podman check --match Fleetwood --source 1'
+    ;;
+esac

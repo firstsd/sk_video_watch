@@ -1,10 +1,12 @@
 import asyncio
 import socket
+from contextlib import asynccontextmanager
 
 import httpx
 import pytest
 from curl_cffi import CurlOpt
 from fastapi import HTTPException
+from starlette.requests import ClientDisconnect
 
 from app.media import MediaService, Playback, public_address, read_browser_public, read_public
 
@@ -96,15 +98,19 @@ def test_unknown_resources_cannot_be_used_as_an_open_proxy():
 
 
 def test_relay_rejects_html_in_place_of_video(monkeypatch):
+    @asynccontextmanager
     async def fake_read(*args):
-        return (
-            b"<html>Ad player</html>",
+        async def chunks():
+            yield b"<html>Ad player</html>"
+
+        yield (
+            chunks(),
             "https://video.example/a",
             200,
             {"content-type": "text/html"},
         )
 
-    monkeypatch.setattr("app.media.read_public", fake_read)
+    monkeypatch.setattr("app.media.open_public", fake_read)
 
     async def scenario():
         service = MediaService()
@@ -115,6 +121,133 @@ def test_relay_rejects_html_in_place_of_video(monkeypatch):
             with pytest.raises(HTTPException) as error:
                 await service.resource("session", key)
             assert error.value.status_code == 502
+        finally:
+            await service.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("browser_http", [False, True])
+def test_relay_forwards_video_before_the_upstream_segment_finishes(monkeypatch, browser_http):
+    async def scenario():
+        requested = []
+        closed = []
+
+        async def chunks():
+            requested.append(1)
+            yield b"a" * 128
+            requested.append(2)
+            yield b"b" * 128
+
+        @asynccontextmanager
+        async def opened(*args):
+            try:
+                yield (
+                    chunks(),
+                    "https://video.example/a.ts",
+                    206,
+                    {
+                        "content-type": "video/mp2t",
+                        "content-length": "256",
+                        "content-range": "bytes 0-255/512",
+                    },
+                )
+            finally:
+                closed.append(True)
+
+        monkeypatch.setattr(
+            "app.media.open_browser_public" if browser_http else "app.media.open_public", opened
+        )
+        service = MediaService()
+        playback = Playback("session", {}, browser_http=browser_http)
+        key = playback.grant("https://video.example/a.ts").rsplit("/", 1)[1]
+        service.playbacks[playback.id] = playback
+        try:
+            response = await service.resource(playback.id, key)
+            assert response.status_code == 206
+            assert response.headers["content-range"] == "bytes 0-255/512"
+            assert response.headers["content-length"] == "256"
+            assert response.headers["x-accel-buffering"] == "no"
+            assert requested == [1]
+            assert not closed
+            assert await anext(response.body_iterator) == b"a" * 128
+            assert requested == [1]  # The rest has not been downloaded yet.
+            assert await anext(response.body_iterator) == b"b" * 128
+            await response.aclose()
+            assert closed == [True]
+        finally:
+            await service.close()
+
+    asyncio.run(scenario())
+
+
+def test_relay_closes_upstream_when_viewer_disconnects(monkeypatch):
+    async def scenario():
+        closed = []
+
+        @asynccontextmanager
+        async def opened(*args):
+            async def chunks():
+                yield b"video" * 30
+                await asyncio.Event().wait()
+
+            try:
+                yield chunks(), "https://video.example/a.ts", 200, {}
+            finally:
+                closed.append(True)
+
+        monkeypatch.setattr("app.media.open_public", opened)
+        service = MediaService()
+        playback = Playback("session", {})
+        key = playback.grant("https://video.example/a.ts").rsplit("/", 1)[1]
+        service.playbacks[playback.id] = playback
+        try:
+            response = await service.resource(playback.id, key)
+            scope = {"type": "http", "asgi": {"spec_version": "2.4"}}
+
+            async def receive():
+                return {"type": "http.disconnect"}
+
+            async def send(message):
+                if message["type"] == "http.response.body":
+                    raise OSError("Viewer disconnected")
+
+            with pytest.raises(ClientDisconnect):
+                await response(scope, receive, send)
+            assert closed == [True]
+        finally:
+            await service.close()
+
+    asyncio.run(scenario())
+
+
+def test_relay_buffers_and_rewrites_playlists_before_responding(monkeypatch):
+    async def scenario():
+        closed = []
+
+        @asynccontextmanager
+        async def opened(*args):
+            async def chunks():
+                yield b"#EXT"
+                yield b"M3U\n#EXTINF:6,\nhttps://video.example/segment.ts\n"
+
+            try:
+                yield chunks(), "https://video.example/main.m3u8", 200, {}
+            finally:
+                closed.append(True)
+
+        monkeypatch.setattr("app.media.open_public", opened)
+        service = MediaService()
+        playback = Playback("session", {})
+        key = playback.grant("https://video.example/main.m3u8").rsplit("/", 1)[1]
+        service.playbacks[playback.id] = playback
+        try:
+            response = await service.resource(playback.id, key)
+            assert response.status_code == 200
+            assert response.media_type == "application/vnd.apple.mpegurl"
+            assert b"https://" not in response.body
+            assert b"/api/media/session/" in response.body
+            assert closed == [True]
         finally:
             await service.close()
 

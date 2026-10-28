@@ -1,0 +1,22 @@
+[Unit]
+Description=Matchday personal sports viewer (Podman)
+
+[Container]
+Image=localhost/matchday:latest
+ContainerName=matchday
+Pull=never
+PublishPort=127.0.0.1:8000:8000
+EnvironmentFile=%h/.config/matchday/matchday.env
+RunInit=true
+ShmSize=512m
+NoNewPrivileges=true
+DropCapability=ALL
+
+[Service]
+Restart=on-failure
+RestartSec=3
+TimeoutStartSec=120
+TimeoutStopSec=45
+
+[Install]
+WantedBy=default.target

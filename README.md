@@ -6,9 +6,12 @@ isolated Chromium session, then relays its playlists and video data to the local
 
 ## Deploy from Git and run in the background
 
-See [the complete Ubuntu deployment guide](deploy/README.md) for pushing your repository, cloning
-on Ubuntu, and installing the systemd service with `./scripts/server install`. Start, stop, status,
-logs, and updates are available through the same script.
+Choose a deployment model: [Ubuntu with native uv/systemd](deploy/ubuntu.md) or
+[AlmaLinux/RHEL 9 with rootless Podman/systemd](deploy/almalinux.md). The
+[deployment overview](deploy/README.md) includes Git instructions. Start, stop, status, logs, and
+updates have helper commands for both models. For a work laptop using Windows OpenVPN, read the
+[WSL/VPN guide](deploy/wsl-vpn.md): neither WSL nor a container automatically excludes video from
+the Windows VPN. The host must be awake and running while you watch.
 
 ## Run
 
@@ -120,6 +123,25 @@ with a healthy buffer can point to decoding/rendering trouble on the device. The
 not uniquely identify ISP vs provider problems, and cannot detect every frozen picture already
 encoded in the upstream broadcast. Video request errors are not IP packet loss; no ICMP ping or
 website response timings are presented as video health.
+
+Video chunks are forwarded as they arrive rather than downloaded in full before being sent to the
+viewer. hls.js uses progressive loading to consume that data during download. Playlists are still
+fully validated and rewritten before being returned. Reverse proxies must allow streaming responses;
+the media endpoint sends `X-Accel-Buffering: no` for Nginx.
+
+If the provider plays smoothly at home but Matchday buffers on a remote server, compare delivery
+from that server. Run this in the checkout on the machine actually hosting Matchday:
+
+```sh
+uv run python -m app.check_streamfree --match Fleetwood --source 1
+```
+
+Use part of a currently listed match title. The check downloads three video segments and prints
+first-byte time, total download time, and segment duration. Repeated downloads slower than their
+video duration indicate that the server's route to the provider cannot sustain this rendition.
+The provider's player can use a different CDN route or peer delivery on your home connection.
+The command does not print upstream URLs or signed tokens. A larger buffer target cannot exceed
+the amount of video in the provider's sliding playlist.
 
 Native HLS playback (for browsers without Media Source support) does not expose the same fragment
 and live-edge measurements; unavailable values remain blank. The locally hosted hls.js library is

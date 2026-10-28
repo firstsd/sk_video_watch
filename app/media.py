@@ -13,7 +13,7 @@ import re
 import secrets
 import socket
 import time
-from contextlib import suppress
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
@@ -22,6 +22,7 @@ import httpx
 from curl_cffi import CurlOpt
 from curl_cffi.requests import AsyncSession, RequestsError
 from fastapi import HTTPException
+from fastapi.responses import Response, StreamingResponse
 from playwright.async_api import Error as BrowserError
 from playwright.async_api import async_playwright
 
@@ -54,7 +55,8 @@ async def public_address(url):
     return next((ip for ip in ips if ":" not in ip), ips[0])
 
 
-async def read_public(client, url, headers, byte_range=None):
+@asynccontextmanager
+async def open_public(client, url, headers, byte_range=None):
     """Validate every redirect and pin DNS to the checked IP (including TLS SNI)."""
     for _ in range(5):
         ip = await public_address(url)
@@ -74,16 +76,37 @@ async def read_public(client, url, headers, byte_range=None):
                 url = urljoin(url, response.headers["location"])
                 continue
             response.raise_for_status()
-            data = bytearray()
-            async for part in response.aiter_bytes():
-                data.extend(part)
-                if len(data) > 16_000_000:
-                    raise ValueError("Media resource exceeded size limit")
-            return bytes(data), url, response.status_code, response.headers
+            yield response.aiter_bytes(), url, response.status_code, response.headers
+            return
     raise ValueError("Too many media redirects")
 
 
-async def read_browser_public(url, headers, byte_range=None, sessions=None):
+async def limited_chunks(chunks):
+    total = 0
+    async for chunk in chunks:
+        total += len(chunk)
+        if total > 16_000_000:
+            raise ValueError("Media resource exceeded size limit")
+        if chunk:
+            yield chunk
+
+
+async def collect(chunks):
+    return b"".join([chunk async for chunk in limited_chunks(chunks)])
+
+
+async def read_public(client, url, headers, byte_range=None):
+    async with open_public(client, url, headers, byte_range) as (
+        chunks,
+        final,
+        status,
+        response_headers,
+    ):
+        return await collect(chunks), final, status, response_headers
+
+
+@asynccontextmanager
+async def open_browser_public(url, headers, byte_range=None, sessions=None):
     """Browser-compatible TLS for media hosts that reject the standard client.
 
     Each request pins its checked DNS address and disables proxy/environment
@@ -121,12 +144,8 @@ async def read_browser_public(url, headers, byte_range=None, sessions=None):
                     url = urljoin(url, response.headers["location"])
                     continue
                 response.raise_for_status()
-                data = bytearray()
-                async for chunk in response.aiter_content():
-                    data.extend(chunk)
-                    if len(data) > 16_000_000:
-                        raise ValueError("Media resource exceeded size limit")
-                return bytes(data), url, response.status_code, response.headers
+                yield response.aiter_content(), url, response.status_code, response.headers
+                return
             finally:
                 await response.aclose()
         raise ValueError("Too many media redirects")
@@ -135,6 +154,32 @@ async def read_browser_public(url, headers, byte_range=None, sessions=None):
             await asyncio.gather(
                 *(client.close() for client in owned_sessions.values()), return_exceptions=True
             )
+
+
+async def read_browser_public(url, headers, byte_range=None, sessions=None):
+    async with open_browser_public(url, headers, byte_range, sessions) as upstream:
+        chunks, final, status, response_headers = upstream
+        return await collect(chunks), final, status, response_headers
+
+
+class RelayResponse(StreamingResponse):
+    """Keep the upstream open during playback and close it even on disconnect."""
+
+    def __init__(self, content, upstream, **kwargs):
+        super().__init__(content, **kwargs)
+        self.upstream = upstream
+        self.closed = False
+
+    async def aclose(self):
+        if not self.closed:
+            self.closed = True
+            await self.upstream.__aexit__(None, None, None)
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            await self.aclose()
 
 
 @dataclass
@@ -351,29 +396,61 @@ class MediaService:
         url = playback.resources.get(key)
         if not url:
             raise HTTPException(404, "Unknown media resource")
+        upstream = (
+            open_browser_public(url, playback.headers, byte_range, self.browser_clients)
+            if playback.browser_http
+            else open_public(self.client, url, playback.headers, byte_range)
+        )
+        entered = False
         try:
-            if playback.browser_http:
-                body, final_url, status, headers = await read_browser_public(
-                    url, playback.headers, byte_range, self.browser_clients
+            chunks, final_url, status, headers = await upstream.__aenter__()
+            entered = True
+            chunks = limited_chunks(chunks)
+            prefix = bytearray()
+            # Inspect the leading bytes before sending headers; do not download the
+            # entire multi-megabyte segment before the viewer can receive any video.
+            async for chunk in chunks:
+                prefix.extend(chunk)
+                if len(prefix) >= 64:
+                    break
+            leading = bytes(prefix).lstrip(b"\xef\xbb\xbf \t\r\n")
+            if leading.startswith(b"#EXTM3U"):
+                body = bytes(prefix) + b"".join([chunk async for chunk in chunks])
+                return Response(
+                    playback.playlist(body.decode("utf-8-sig"), final_url),
+                    media_type="application/vnd.apple.mpegurl",
+                    headers={"Cache-Control": "no-store"},
                 )
-            else:
-                body, final_url, status, headers = await read_public(
-                    self.client, url, playback.headers, byte_range
-                )
-            if body.lstrip().startswith(b"#EXTM3U"):
-                return (
-                    playback.playlist(body.decode("utf-8-sig"), final_url).encode(),
-                    "application/vnd.apple.mpegurl",
-                    200,
-                    {},
-                )
-            if "text/html" in headers.get("content-type", "") or body.lstrip().lower().startswith(
+            if "text/html" in headers.get("content-type", "").lower() or leading.lower().startswith(
                 (b"<!doctype", b"<html")
             ):
                 raise ValueError("Received a webpage instead of video")
             extra = {
                 key: headers[key] for key in ("content-range", "accept-ranges") if key in headers
             }
-            return body, "application/octet-stream", status, extra
+            length = headers.get("content-length", "")
+            if length.isdigit() and not headers.get("content-encoding"):
+                if int(length) > 16_000_000:
+                    raise ValueError("Media resource exceeded size limit")
+                extra["Content-Length"] = length
+            extra.update({"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
+            async def body_stream():
+                yield bytes(prefix)
+                async for chunk in chunks:
+                    yield chunk
+
+            response = RelayResponse(
+                body_stream(),
+                upstream,
+                media_type="application/octet-stream",
+                status_code=status,
+                headers=extra,
+            )
+            entered = False  # The streaming response now owns the upstream context.
+            return response
         except (ValueError, OSError, httpx.HTTPError, RequestsError) as exc:
             raise HTTPException(502, "Video data unavailable from provider") from exc
+        finally:
+            if entered:
+                await upstream.__aexit__(None, None, None)

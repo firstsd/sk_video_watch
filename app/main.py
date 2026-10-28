@@ -8,7 +8,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.auth import Credentials, access_error, auth_enabled_from_environment
@@ -154,12 +154,4 @@ async def play(match_id: str, source_id: str, request: Request):
 
 @app.get("/api/media/{session}/{key}")
 async def media(session: str, key: str, request: Request):
-    body, content_type, status, headers = await request.app.state.media.resource(
-        session, key, request.headers.get("range")
-    )
-    return Response(
-        body,
-        media_type=content_type,
-        status_code=status,
-        headers={**headers, "Cache-Control": "no-store"},
-    )
+    return await request.app.state.media.resource(session, key, request.headers.get("range"))

@@ -31,6 +31,15 @@ def main():
         print("Video discovery browser is ready.")
         return
     except Error:
+        if platform.system() == "Linux":
+            distro = platform.freedesktop_os_release()
+            families = {distro.get("ID", ""), *distro.get("ID_LIKE", "").split()}
+            if families & {"almalinux", "rhel", "centos", "rocky", "fedora"}:
+                raise SystemExit(
+                    "Native Playwright browser startup failed on this RHEL-family host. "
+                    "Use the Podman deployment: deploy/almalinux.md. "
+                    "The Playwright --with-deps installer targets Debian/Ubuntu, not dnf."
+                ) from None
         if (
             platform.system() != "Linux"
             or not shutil.which("apt-get")
