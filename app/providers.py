@@ -249,9 +249,14 @@ async def resolve(client, match):
             and isinstance(data.get("sources"), list)
         ):
             for i, source in enumerate(data["sources"], 1):
-                url = public_https(source)
+                # StreamFree now includes quality metadata; older responses used URL strings.
+                url = public_https(source.get("url") if isinstance(source, dict) else source)
                 if url:
-                    stream = {"url": url, "label": f"StreamFree · Source {i}"}
+                    label = f"StreamFree · Source {i}"
+                    quality = source.get("quality") if isinstance(source, dict) else None
+                    if isinstance(quality, str) and quality.strip():
+                        label += f" · {quality.strip()}"
+                    stream = {"url": url, "label": label}
                     parts = urlsplit(url)
                     page = urlsplit(match["page_url"])
                     # StreamFree's own page uses same-mirror embeds with autoplay.

@@ -112,8 +112,9 @@ def test_streamfree_mixed_feed_keeps_soccer_and_basketball_separate():
     assert soccer["id"] != basketball["id"]
 
 
-def test_catalog_loads_streamfree_basketball_and_resolves_its_player():
-    key = "miami-heat-vs-atlanta-hawks"
+@pytest.mark.parametrize("structured", [False, True])
+def test_catalog_loads_streamfree_basketball_and_resolves_its_player(structured):
+    key = "charlotte-hornets-vs-washington-wizards"
     embed = f"https://strmfree.st/embed/basketball/{key}1080p"
     calls = []
 
@@ -130,7 +131,7 @@ def test_catalog_loads_streamfree_basketball_and_resolves_its_player():
                         "streams": [
                             {
                                 "stream_key": key,
-                                "name": "Miami Heat vs Atlanta Hawks",
+                                "name": "Charlotte Hornets vs Washington Wizards",
                                 "category": "basketball",
                                 "league": "NBA",
                             }
@@ -138,7 +139,10 @@ def test_catalog_loads_streamfree_basketball_and_resolves_its_player():
                     },
                 )
             assert request.url.path == f"/api/v1/sources/{key}"
-            return httpx.Response(200, json={"sources": [embed]})
+            return httpx.Response(
+                200,
+                json={"sources": [{"url": embed, "quality": "FHD"}] if structured else [embed]},
+            )
         return httpx.Response(200, text='<table><tbody id="myTable"></tbody></table>')
 
     async def scenario():
@@ -153,6 +157,9 @@ def test_catalog_loads_streamfree_basketball_and_resolves_its_player():
             assert listing["providers"][1]["count"] == 1
             source = (await catalog.streams(match["id"]))["streams"][0]
             assert source["url"] == embed
+            assert source["label"] == (
+                "StreamFree · Source 1 · FHD" if structured else "StreamFree · Source 1"
+            )
             assert source["discovery_url"] == (
                 f"https://streamfree.top/embed/basketball/{key}1080p?autostart=1"
             )
@@ -269,6 +276,46 @@ def test_streamfree_with_no_live_sources_does_not_invent_a_player():
         transport = httpx.MockTransport(lambda request: httpx.Response(200, json={"sources": []}))
         async with httpx.AsyncClient(transport=transport) as client:
             assert (await resolve(client, match))["streams"] == []
+
+    run(scenario())
+
+
+def test_streamfree_quality_sources_keep_both_players_and_reject_invalid_urls():
+    async def scenario():
+        match = parse_streamfree(
+            {"streams": [{"name": "Arsenal vs Chelsea", "stream_key": "one", "category": "soccer"}]}
+        )[0]
+        embeds = [
+            {"quality": "FHD", "url": "https://strmfree.st/embed/soccer/one1080p"},
+            {"quality": "SD", "url": "https://strmfree.st/embed/soccer/one540p"},
+            "https://player.example/legacy",
+            {"quality": "HD", "url": "https://127.0.0.1/private"},
+            {"quality": "HD", "url": "javascript:alert(1)"},
+            {"quality": "HD"},
+            {"url": {"url": "https://player.example/nested"}},
+            None,
+            42,
+        ]
+        transport = httpx.MockTransport(
+            lambda request: httpx.Response(200, json={"sources": embeds})
+        )
+        async with httpx.AsyncClient(transport=transport) as client:
+            data = await resolve(client, match)
+        first, second, legacy = data["streams"]
+        assert first["label"] == "StreamFree · Source 1 · FHD"
+        assert second["label"] == "StreamFree · Source 2 · SD"
+        for stream, original in zip((first, second), embeds[:2]):
+            assert stream["url"] == original["url"]
+            assert stream["discovery_url"] == (
+                original["url"].replace("strmfree.st", "streamfree.top") + "?autostart=1"
+            )
+            assert stream["discovery_referer"] == match["page_url"]
+            assert len(stream["id"]) == 24
+        assert first["id"] != second["id"]
+        assert legacy["url"] == embeds[2]
+        assert legacy["label"] == "StreamFree · Source 3"
+        assert "discovery_url" not in legacy
+        assert data["warnings"] == []
 
     run(scenario())
 
