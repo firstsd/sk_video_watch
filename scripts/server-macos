@@ -1,0 +1,124 @@
+#!/bin/bash
+# Run Matchday under the logged-in Mac user's launchd.
+set -euo pipefail
+umask 077
+
+action=${1:-help}
+usage='Usage: ./scripts/server-macos {install|start|stop|restart|status|logs|update|uninstall}'
+die() { echo "$*" >&2; exit 1; }
+case "$action" in
+  help|-h|--help) echo "$usage"; exit 0 ;;
+  install|start|stop|restart|status|logs|update|uninstall|serve|apply-update) ;;
+  *) die "$usage" ;;
+esac
+
+[[ "$(uname -s)" == Darwin ]] || die 'This helper is for macOS. See deploy/README.md for Linux.'
+[[ "$EUID" != 0 ]] || die 'Run this as your logged-in Mac user, without sudo.'
+project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+cd "$project_dir"
+label=local.matchday
+domain="gui/$UID"
+job="$domain/$label"
+agent_dir="$HOME/Library/LaunchAgents"
+plist="$agent_dir/$label.plist"
+config_dir="$HOME/Library/Application Support/Matchday"
+settings="$config_dir/matchday.env"
+log_dir="$HOME/Library/Logs/Matchday"
+log_file="$log_dir/matchday.log"
+python="$project_dir/.venv/bin/python"
+# Use the same Chromium installation in Terminal and at login.
+export PLAYWRIGHT_BROWSERS_PATH="$HOME/Library/Caches/ms-playwright"
+
+if [[ "$action" == serve ]]; then
+  # Read literal settings. In particular, a password is never evaluated by the shell.
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      ''|'#'*) ;;
+      MATCHDAY_HOST=*|MATCHDAY_PORT=*|MATCHDAY_AUTH_ENABLED=*|MATCHDAY_USERNAME=*|MATCHDAY_PASSWORD=*)
+        export "$line" ;;
+      *) die "Invalid setting in $settings. Use one MATCHDAY key=value per line." ;;
+    esac
+  done < "$settings"
+  exec "$python" -u -m uvicorn app.main:app --host "${MATCHDAY_HOST:-127.0.0.1}" \
+    --port "${MATCHDAY_PORT:-8000}" --no-access-log
+fi
+
+if [[ "$action" != install && ! -f "$plist" ]]; then
+  die 'Matchday is not installed. Run ./scripts/server-macos install first.'
+fi
+if [[ "$action" == logs ]]; then
+  exec tail -n 100 -F "$log_file"
+fi
+launchctl print "$domain" >/dev/null 2>&1 || die 'Log in to the Mac desktop and run this in Terminal.'
+loaded() { launchctl print "$job" >/dev/null 2>&1; }
+
+# Generate the plist atomically, keeping paths with spaces or XML characters intact.
+write_agent() (
+  draft="$(mktemp "$agent_dir/.$label.XXXXXX")"
+  trap 'rm -f "$draft"' EXIT
+  "$python" - "$label" "$project_dir" "$log_file" > "$draft" <<'PY'
+import plistlib
+import sys
+from pathlib import Path
+
+label, project, log = sys.argv[1:]
+plistlib.dump({
+    "Label": label,
+    "ProgramArguments": [str(Path(project) / "scripts/server-macos"), "serve"],
+    "WorkingDirectory": project,
+    "RunAtLoad": True,
+    "KeepAlive": {"SuccessfulExit": False},
+    "StandardOutPath": log,
+    "StandardErrorPath": log,
+}, sys.stdout.buffer)
+PY
+  mv -f "$draft" "$plist"
+)
+
+case "$action" in
+  install|apply-update)
+    command -v uv >/dev/null || die 'Install uv first. See deploy/macos.md.'
+    UV_PROJECT_ENVIRONMENT="$project_dir/.venv" uv sync --locked --no-dev --python 3.12
+    "$python" -m app.setup_browser
+    mkdir -p "$agent_dir" "$config_dir" "$log_dir"
+    if [[ ! -e "$settings" ]]; then
+      install -m 600 deploy/matchday-macos.env.example "$settings"
+    fi
+    chmod 600 "$settings"
+    touch "$log_file"
+    write_agent
+    if loaded; then
+      launchctl bootout "$job"
+    elif [[ "$action" == apply-update ]]; then
+      echo 'Updated. Matchday is stopped. Use ./scripts/server-macos start when ready.'
+      exit 0
+    fi
+    launchctl enable "$job"
+    launchctl bootstrap "$domain" "$plist"
+    echo "LaunchAgent installed. Edit $settings to change the service settings."
+    ;;
+  start|restart)
+    launchctl enable "$job"
+    if ! loaded; then
+      launchctl bootstrap "$domain" "$plist"
+    elif [[ "$action" == restart ]]; then
+      launchctl kickstart -k "$job"
+    else
+      launchctl kickstart "$job"
+    fi
+    ;;
+  stop|uninstall)
+    launchctl disable "$job"
+    if loaded; then launchctl bootout "$job"; fi
+    if [[ "$action" == uninstall ]]; then rm -f "$plist"; fi
+    ;;
+  status)
+    if loaded; then launchctl print "$job"; else echo 'Matchday is stopped.'; fi
+    ;;
+  update)
+    changes="$(git status --porcelain)"
+    [[ -z "$changes" ]] || die 'The checkout has local changes. Commit or move them before updating.'
+    git pull --ff-only
+    exec "$project_dir/scripts/server-macos" apply-update
+    ;;
+esac

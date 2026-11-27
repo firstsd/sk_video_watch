@@ -2,13 +2,13 @@
 
 | Host | Deployment model | Guide |
 | --- | --- | --- |
+| MacBook Air (macOS 14+) | Native Python/uv and a per-user LaunchAgent | [macOS](macos.md) |
 | Ubuntu | Native Python/uv + system systemd service | [Ubuntu](ubuntu.md) |
 | AlmaLinux/RHEL 9 | Rootless Podman + user systemd/Quadlet | [AlmaLinux](almalinux.md) |
 
-Both use the same application, player, and streaming settings. Ubuntu runs directly on the host;
-the AlmaLinux model provides the browser's supported Debian userspace in a container. For WSL on
-your work laptop, read [Windows OpenVPN routing and laptop availability](wsl-vpn.md). Neither model
-changes VPN routes or keeps a powered-off/sleeping laptop available.
+All three run the same application and player. macOS and Ubuntu run directly on the host.
+AlmaLinux uses a container for the browser's Debian runtime. Keep the host awake while you watch.
+For WSL on your work laptop, see [Windows OpenVPN routing and laptop availability](wsl-vpn.md).
 
 ## Git and native Ubuntu deployment
 

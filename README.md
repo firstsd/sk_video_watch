@@ -6,12 +6,16 @@ isolated Chromium session, then relays its playlists and video data to the local
 
 ## Deploy from Git and run in the background
 
-Choose a deployment model: [Ubuntu with native uv/systemd](deploy/ubuntu.md) or
-[AlmaLinux/RHEL 9 with rootless Podman/systemd](deploy/almalinux.md). The
-[deployment overview](deploy/README.md) includes Git instructions. Start, stop, status, logs, and
-updates have helper commands for both models. For a work laptop using Windows OpenVPN, read the
-[WSL/VPN guide](deploy/wsl-vpn.md): neither WSL nor a container automatically excludes video from
-the Windows VPN. The host must be awake and running while you watch.
+Each platform has an installer and commands to start, stop, update, and follow the service logs.
+Choose the guide for your host.
+
+- [macOS on a MacBook Air with native uv and launchd](deploy/macos.md)
+- [Ubuntu with native uv and systemd](deploy/ubuntu.md)
+- [AlmaLinux/RHEL 9 with rootless Podman and systemd](deploy/almalinux.md)
+
+The [deployment overview](deploy/README.md) includes Git instructions. For a work laptop using Windows OpenVPN, read the
+[WSL/VPN guide](deploy/wsl-vpn.md) for how Windows routes video traffic. The host must be awake
+and running while you watch.
 
 ## Run
 
@@ -44,8 +48,9 @@ Chrome (Ctrl+Shift+R). The server now blocks all frames with its content securit
 
 ## Login
 
-Login is configurable per machine; it is **enabled by default**. Set `MATCHDAY_AUTH_ENABLED=false`
-for a local laptop/WSL instance bound to `127.0.0.1`. No username or password is needed in that mode.
+The app **enables login by default**. The Mac laptop installer explicitly turns it off for
+`127.0.0.1`. To use the same setting on a local laptop/WSL instance, bind to `127.0.0.1` and
+set `MATCHDAY_AUTH_ENABLED=false`. No username or password is needed in that mode.
 Set `MATCHDAY_AUTH_ENABLED=true` on Ubuntu and configure `MATCHDAY_USERNAME` and `MATCHDAY_PASSWORD`.
 Changes take effect after restarting the app. Accepted switch values are `true`/`false` or `1`/`0`
 (case-insensitive). An invalid value prevents startup rather than silently disabling protection.

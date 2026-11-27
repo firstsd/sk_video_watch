@@ -98,12 +98,15 @@ def test_container_restart_targets_user_service(fake_service_tools):
     assert commands == [["systemctl", "--user", "restart", "matchday.service"]]
 
 
-def test_rhel_browser_failure_points_to_podman_instead_of_apt(monkeypatch):
+@pytest.mark.parametrize(
+    ("system", "guide"), [("Linux", "deploy/almalinux.md"), ("Darwin", "deploy/macos.md")]
+)
+def test_browser_failure_points_to_platform_guide(monkeypatch, system, guide):
     commands = []
     monkeypatch.setattr(
         setup_browser.subprocess, "run", lambda command, **kwargs: commands.append(command)
     )
-    monkeypatch.setattr(setup_browser.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(setup_browser.platform, "system", lambda: system)
     monkeypatch.setattr(
         setup_browser.platform,
         "freedesktop_os_release",
@@ -114,6 +117,6 @@ def test_rhel_browser_failure_points_to_podman_instead_of_apt(monkeypatch):
         raise Error("Missing browser library")
 
     monkeypatch.setattr(setup_browser, "check_browser", failed_browser)
-    with pytest.raises(SystemExit, match="deploy/almalinux.md"):
+    with pytest.raises(SystemExit, match=guide):
         setup_browser.main()
     assert commands == [[sys.executable, "-m", "playwright", "install", "chromium"]]

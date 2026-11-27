@@ -30,7 +30,11 @@ def main():
         check_browser()
         print("Video discovery browser is ready.")
         return
-    except Error:
+    except Error as exc:
+        if platform.system() == "Darwin":
+            raise SystemExit(
+                f"Chromium could not start on macOS. See deploy/macos.md.\n{exc}"
+            ) from exc
         if platform.system() == "Linux":
             distro = platform.freedesktop_os_release()
             families = {distro.get("ID", ""), *distro.get("ID_LIKE", "").split()}
