@@ -4,6 +4,13 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 
+const playbackSettings = {
+  live_target_seconds: 100,
+  live_max_seconds: 130,
+  forward_buffer_seconds: 110,
+  back_buffer_seconds: 20,
+};
+
 class Video extends EventTarget {
   constructor() {
     super();
@@ -21,10 +28,11 @@ class Video extends EventTarget {
 }
 
 class Hls {
-  static Events = {MEDIA_ATTACHED: 'attached', MANIFEST_PARSED: 'manifest', FRAG_LOADED: 'fragment', ERROR: 'error'};
+  static Events = {MEDIA_ATTACHED: 'attached', MANIFEST_PARSED: 'manifest', LEVEL_UPDATED: 'level', FRAG_LOADED: 'fragment', ERROR: 'error'};
   static ErrorTypes = {NETWORK_ERROR: 'networkError', MEDIA_ERROR: 'mediaError'};
   static isSupported() { return true; }
-  constructor(options) { this.options = options; this.events = {}; this.loads = []; this.starts = []; }
+  constructor(options) { this.options = options; this.config = {...options}; this.events = {}; this.loads = []; this.starts = []; }
+  set targetLatency(seconds) { this.config.liveSyncDuration = seconds; }
   on(event, fn) { (this.events[event] ||= []).push(fn); }
   once(event, fn) {
     this.on(event, (...args) => {
@@ -58,7 +66,7 @@ function setup() {
 
 test('media recovery preserves the existing source and does not prematurely pause the video', () => {
   const {player, nodes} = setup();
-  player.start('/media/playlist');
+  player.start('/media/playlist', playbackSettings);
   const hls = player.hls;
   hls.firstLevel = 1;
   hls.emit(Hls.Events.MANIFEST_PARSED);
@@ -67,9 +75,6 @@ test('media recovery preserves the existing source and does not prematurely paus
   assert.equal(hls.options.lowLatencyMode, false);
   assert.equal(hls.options.startLevel, -1);
   assert.equal(hls.options.capLevelToPlayerSize, true);
-  assert.equal(hls.options.maxBufferLength, 120);
-  assert.equal(hls.options.liveSyncDurationCount, 10);
-  assert.equal(hls.options.liveMaxLatencyDurationCount, 20);
   player.video.dispatchEvent(new Event('error'));
   assert.equal(player.video.paused, false);
   hls.emit(Hls.Events.ERROR, {type: Hls.ErrorTypes.MEDIA_ERROR, details: 'bufferAppendError', fatal: true});
@@ -78,6 +83,28 @@ test('media recovery preserves the existing source and does not prematurely paus
   assert.notEqual(nodes.get('video-state').textContent, 'Error');
   hls.emit(Hls.Events.ERROR, {type: Hls.ErrorTypes.NETWORK_ERROR, details: 'fragLoadError', fatal: true});
   assert.deepEqual(hls.starts, [42]);
+  player.stop();
+});
+
+test('live delay fits the available window and returns to the preferred target on a longer feed', () => {
+  const {player} = setup();
+  player.start('/media/playlist', playbackSettings);
+  const hls = player.hls;
+  assert.equal(hls.config.liveSyncDuration, 100);
+  assert.equal(hls.config.liveMaxLatencyDuration, 130);
+  assert.equal(hls.config.maxBufferLength, 110);
+  assert.equal(hls.config.maxMaxBufferLength, 110);
+  assert.equal(hls.config.backBufferLength, 20);
+  const update = (duration, live = true) => hls.emit(Hls.Events.LEVEL_UPDATED, {
+    details: {live, totalduration: duration, targetduration: 6},
+  });
+  update(60);
+  assert.equal(hls.config.liveSyncDuration, 54);
+  update(240);
+  assert.equal(hls.config.liveSyncDuration, 100);
+  update(30, false);
+  update(NaN);
+  assert.equal(hls.config.liveSyncDuration, 100);
   player.stop();
 });
 
@@ -90,7 +117,7 @@ test('rapid source switching waits for the active check and skips superseded sel
   };
   const context = vm.createContext({
     document, AbortSignal, performance, setInterval, clearInterval,
-    DirectPlayer: class { stop() {} start(url) { starts.push(url); } },
+    DirectPlayer: class { stop() {} start(url, settings) { starts.push([url, settings]); } },
     fetch(url, options) { return new Promise(resolve => requests.push({url, resolve, options})); },
   });
   const source = fs.readFileSync(path.join(__dirname, '../app/static/app.js'), 'utf8');
@@ -106,14 +133,14 @@ test('rapid source switching waits for the active check and skips superseded sel
   await new Promise(setImmediate);
   assert.deepEqual(requests.map(r => r.url), ['/api/matches/match/play/a', '/api/matches/match/play/c']);
   assert.deepEqual(starts, []);
-  requests[1].resolve({ok: true, json: async () => ({url: '/video/c'})});
+  requests[1].resolve({ok: true, json: async () => ({url: '/video/c', playback_settings: playbackSettings})});
   await Promise.all([a, b, c]);
-  assert.deepEqual(starts, ['/video/c']);
+  assert.deepEqual(starts, [['/video/c', playbackSettings]]);
 });
 
 test('buffer health shows risk only during playback and returns to neutral when paused', () => {
   const {player, nodes} = setup();
-  player.start('/media/playlist');
+  player.start('/media/playlist', playbackSettings);
   const video = player.video;
   video.buffered = {length: 1, start: () => 40, end: () => 43};
   video.dispatchEvent(new Event('playing'));

@@ -32,7 +32,7 @@ class DirectPlayer {
     this.text('health-summary', 'Waiting for playback measurements.');
   }
 
-  start(url) {
+  start(url, settings) {
     this.stop();
     const video = document.createElement('video');
     this.video = video;
@@ -129,19 +129,34 @@ class DirectPlayer {
       if (this.video === video) this.text('player-status', 'Video ready. Press play to start.');
     });
     if (window.Hls?.isSupported()) {
+      const {
+        live_target_seconds: preferredDelay,
+        live_max_seconds: maxDelay,
+        forward_buffer_seconds: forwardBuffer,
+        back_buffer_seconds: backBuffer,
+      } = settings;
       const hls = new Hls({
         enableWorker: true,
         progressive: true,
         lowLatencyMode: false,
         startLevel: -1,
         capLevelToPlayerSize: true,
-        maxBufferLength: 120,
-        maxMaxBufferLength: 120,
-        backBufferLength: 30,
-        liveSyncDurationCount: 10,
-        liveMaxLatencyDurationCount: 20,
+        maxBufferLength: forwardBuffer,
+        maxMaxBufferLength: forwardBuffer,
+        backBufferLength: backBuffer,
+        liveSyncDuration: preferredDelay,
+        liveMaxLatencyDuration: maxDelay,
+        liveSyncOnStallIncrease: 0,
       });
       this.hls = hls;
+      hls.on(Hls.Events.LEVEL_UPDATED, (_, {details}) => {
+        const {live, totalduration, targetduration} = details;
+        if (!live || !Number.isFinite(totalduration) || totalduration <= 0 ||
+            !Number.isFinite(targetduration) || targetduration <= 0) return;
+        // Leave one segment of margin at the start of a short playlist window.
+        const target = Math.min(preferredDelay, Math.max(targetduration, totalduration - targetduration));
+        if (hls.config.liveSyncDuration !== target) hls.targetLatency = target;
+      });
       // Recovery also attaches media; reloading here would discard its resume position.
       hls.once(Hls.Events.MEDIA_ATTACHED, () => hls.loadSource(url));
       hls.on(Hls.Events.MANIFEST_PARSED, () => {

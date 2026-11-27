@@ -7,17 +7,57 @@ import asyncio
 import hashlib
 import ipaddress
 import math
+import re
+from datetime import UTC, datetime
 from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlsplit, urlunsplit
 
 import httpx
 from bs4 import BeautifulSoup
 
-PROVIDERS = {
+PRIMARY_PROVIDERS = {
     "streamed": "https://streamed.pk/category/football",
     "streamfree": "https://streamfree.top/",
     "fsl": "https://freestreams-live1g.pk/football-streamz5/",
 }
-NAMES = {"streamed": "Streamed", "streamfree": "StreamFree", "fsl": "FSL"}
+PROVIDERS = {**PRIMARY_PROVIDERS, "bintv": "https://www.bintv.cc/"}
+NAMES = {"streamed": "Streamed", "streamfree": "StreamFree", "fsl": "FSL", "bintv": "BinTV"}
+BINTV_FEED = "https://api.bintv.link/api/public/bintvjson"
+
+# BinTV groups NBA, college, and international games under the same category.
+NBA_TEAMS = {
+    "atlanta hawks",
+    "boston celtics",
+    "brooklyn nets",
+    "charlotte hornets",
+    "chicago bulls",
+    "cleveland cavaliers",
+    "dallas mavericks",
+    "denver nuggets",
+    "detroit pistons",
+    "golden state warriors",
+    "houston rockets",
+    "indiana pacers",
+    "los angeles clippers",
+    "la clippers",
+    "los angeles lakers",
+    "la lakers",
+    "memphis grizzlies",
+    "miami heat",
+    "milwaukee bucks",
+    "minnesota timberwolves",
+    "new orleans pelicans",
+    "new york knicks",
+    "oklahoma city thunder",
+    "orlando magic",
+    "philadelphia 76ers",
+    "phoenix suns",
+    "portland trail blazers",
+    "sacramento kings",
+    "san antonio spurs",
+    "toronto raptors",
+    "utah jazz",
+    "washington wizards",
+}
 
 
 def public_https(value):
@@ -113,6 +153,66 @@ def parse_streamfree(data):
     return result
 
 
+def parse_bintv(data):
+    groups = ("Live Events", "Upcoming Events")
+    if not isinstance(data, dict) or not any(group in data for group in groups):
+        raise ValueError("Missing BinTV event listings")
+    matches = {}
+    for group in groups:
+        rows = data.get(group, [])
+        if not isinstance(rows, list):
+            raise TypeError("Invalid BinTV event listings")
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            key, title = row.get("ID"), row.get("Name")
+            if (
+                not isinstance(key, str)
+                or not key
+                or key in matches
+                or not isinstance(title, str)
+                or not title.strip()
+            ):
+                continue
+            if row.get("Category") == "Soccer":
+                sport, league = "football", "Football"
+            elif row.get("Category") == "NBA":
+                sport, league = "basketball", "NBA"
+            elif row.get("Category") == "Basketball":
+                teams = re.split(r"\s+(?:vs\.?|@|at)\s+", title.strip().casefold())
+                if len(teams) != 2 or not all(team in NBA_TEAMS for team in teams):
+                    continue
+                sport, league = "basketball", "NBA"
+            else:
+                continue
+            try:
+                start = (
+                    datetime.strptime(row["Date"], "%Y-%m-%d %H:%M UTC")
+                    .replace(tzinfo=UTC)
+                    .timestamp()
+                )
+            except (KeyError, TypeError, ValueError):
+                start = None
+            sources = {}
+            entries = row.get("Streams")
+            for i, item in enumerate(entries if isinstance(entries, list) else [], 1):
+                url = public_https(item.get("Iframe")) if isinstance(item, dict) else None
+                if url and urlsplit(url).hostname == "bintv-sources.pages.dev":
+                    label = item.get("Name") or f"Source {i}"
+                    sources.setdefault(url, {"url": url, "label": f"BinTV · {label}"})
+            matches[key] = event(
+                "bintv",
+                key,
+                title,
+                start,
+                league,
+                sport=sport,
+                sources=list(sources.values()),
+                page_url="https://bintv-cc.pages.dev/?" + urlencode({"src": key, "t": title}),
+            )
+    return list(matches.values())
+
+
 def parse_fsl(html):
     soup = BeautifulSoup(html, "html5lib")
     table = soup.select_one("#myTable")
@@ -184,6 +284,8 @@ def failure(exc):
 
 
 async def load_provider(client, provider):
+    if provider == "bintv":
+        return parse_bintv(await fetch(client, BINTV_FEED))
     if provider == "streamed":
         results = await asyncio.gather(
             fetch(client, "https://streamed.pk/api/matches/football"),
@@ -218,12 +320,13 @@ async def resolve(client, match):
         key = quote(match["key"], safe="")
         tasks.append(fetch(client, f"https://streamfree.top/api/v1/sources/{key}"))
         labels.append("StreamFree")
-    else:
+    elif provider == "fsl":
         for channel in match.get("channels", [])[:16]:
             tasks.append(fetch(client, channel["url"], as_json=False))
             labels.append(channel)
     results = await asyncio.gather(*tasks, return_exceptions=True)
-    streams, warnings = [], []
+    streams = [dict(s) for s in match["sources"]] if provider == "bintv" else []
+    warnings = []
     for label, data in zip(labels, results):
         if isinstance(data, Exception):
             warnings.append(

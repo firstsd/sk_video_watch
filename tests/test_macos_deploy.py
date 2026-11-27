@@ -57,7 +57,9 @@ esac
         f'exec {shlex.quote(sys.executable)} "$@"\n',
     )
     (project / "uvicorn.py").write_text(
-        "import json, os, sys\nprint(json.dumps([sys.argv[1:], os.environ['MATCHDAY_PASSWORD']]))\n"
+        "import json, os, sys\n"
+        "names = ['MATCHDAY_PASSWORD', 'MATCHDAY_FORWARD_BUFFER_SECONDS']\n"
+        "print(json.dumps([sys.argv[1:], *[os.environ[name] for name in names]]))\n"
     )
 
     def run(action, *, check=True):
@@ -74,7 +76,10 @@ esac
     assert settings.read_bytes() == (project / sample).read_bytes()
 
     password = "literal $(exit 99) #=' & $HOME"
-    custom = f"MATCHDAY_PORT=8123\nMATCHDAY_AUTH_ENABLED=true\nMATCHDAY_PASSWORD={password}"
+    custom = (
+        "MATCHDAY_PORT=8123\nMATCHDAY_AUTH_ENABLED=true\n"
+        f"MATCHDAY_PASSWORD={password}\nMATCHDAY_FORWARD_BUFFER_SECONDS=110"
+    )
     settings.write_text(custom)
     run("install")
     process = subprocess.run(
@@ -84,9 +89,10 @@ esac
         capture_output=True,
         text=True,
     )
-    arguments, actual_password = json.loads(process.stdout)
+    arguments, actual_password, forward_buffer = json.loads(process.stdout)
     assert arguments[arguments.index("--port") + 1] == "8123"
     assert actual_password == password
+    assert forward_buffer == "110"
     assert password.encode() not in plist.read_bytes()
 
     monkeypatch.setenv("TEST_SYNC_EXIT", "42")

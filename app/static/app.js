@@ -1,5 +1,7 @@
 const $ = (id) => document.getElementById(id);
-const names = {streamed: 'Streamed', streamfree: 'StreamFree', fsl: 'FSL'};
+const names = {streamed: 'Streamed', streamfree: 'StreamFree', fsl: 'FSL', bintv: 'BinTV'};
+const feedQuery = provider => provider === 'bintv' ? '?backup=true' : '';
+let listingQuery = '';
 let matches = [], sportView = 'arsenal', selected = null, sources = [], sourceIndex = 0;
 let selectionRequest = 0, listingRequest = 0;
 let playbackRequest = 0;
@@ -75,10 +77,19 @@ function setSport(view) {
 
 async function loadMatches() {
   const request = ++listingRequest;
+  const query = feedQuery($('provider').value);
+  if (query !== listingQuery) {
+    matches = [];
+    $('matches').replaceChildren();
+    $('result-count').textContent = 'Loading listings…';
+    $('provider-status').replaceChildren();
+    $('updated').textContent = '';
+  }
+  listingQuery = query;
   $('refresh').disabled = true;
   $('matches').setAttribute('aria-busy', 'true');
   try {
-    const data = await getJSON('/api/matches');
+    const data = await getJSON('/api/matches' + query);
     if (request !== listingRequest) return;
     matches = data.matches;
     renderMatches();
@@ -93,11 +104,14 @@ async function loadMatches() {
     }
     $('updated').textContent = `Fetched ${timeFormat.format(new Date(data.fetched_at))}. Listings cached for 60 seconds; source results for 30 seconds. Kickoff times and titles are supplied by the providers.`;
   } catch (error) {
+    if (request !== listingRequest) return;
     $('result-count').textContent = `Could not refresh: ${error.message}`;
     if (!matches.length) $('matches').replaceChildren(element('div', 'empty', 'The app could not load listings. Use Refresh listings to try again.'));
   } finally {
-    $('refresh').disabled = false;
-    $('matches').setAttribute('aria-busy', 'false');
+    if (request === listingRequest) {
+      $('refresh').disabled = false;
+      $('matches').setAttribute('aria-busy', 'false');
+    }
   }
 }
 
@@ -132,7 +146,7 @@ async function selectMatch(match) {
   renderMatches();
   $('screen').scrollIntoView({behavior: 'smooth', block: 'start'});
   try {
-    const data = await getJSON(`/api/matches/${encodeURIComponent(match.id)}/streams`);
+    const data = await getJSON(`/api/matches/${encodeURIComponent(match.id)}/streams` + feedQuery(match.provider));
     if (request !== selectionRequest) return;
     sources = data.streams;
     sourceIndex = Math.max(0, sources.findIndex(source => source.url === previousSource));
@@ -193,13 +207,13 @@ async function playSource() {
     };
     updateCountdown();
     countdown = setInterval(updateCountdown, 250);
-    const response = await fetch(`/api/matches/${encodeURIComponent(selected.id)}/play/${encodeURIComponent(source.id)}`, {
+    const response = await fetch(`/api/matches/${encodeURIComponent(selected.id)}/play/${encodeURIComponent(source.id)}` + feedQuery(selected.provider), {
       method: 'POST', headers: {'X-Matchday-Request': '1'}, signal: AbortSignal.timeout(20000),
     });
     const data = await response.json();
     if (request !== playbackRequest) return;
     if (!response.ok) throw new Error(data.detail || 'Direct playback unavailable');
-    directPlayer.start(data.url);
+    directPlayer.start(data.url, data.playback_settings);
   } catch (error) {
     if (request !== playbackRequest) return;
     const message = error.name === 'TimeoutError'
@@ -218,7 +232,10 @@ $('arsenal').addEventListener('click', () => setSport('arsenal'));
 $('football').addEventListener('click', () => setSport('football'));
 $('nba').addEventListener('click', () => setSport('nba'));
 $('search').addEventListener('input', renderMatches);
-$('provider').addEventListener('change', renderMatches);
+$('provider').addEventListener('change', () => {
+  if (feedQuery($('provider').value) !== listingQuery) loadMatches();
+  else renderMatches();
+});
 $('refresh').addEventListener('click', loadMatches);
 $('source-select').addEventListener('change', () => {sourceIndex = Number($('source-select').value); playSource();});
 $('next-source').addEventListener('click', () => {sourceIndex = (sourceIndex + 1) % sources.length; playSource();});

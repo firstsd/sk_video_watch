@@ -72,6 +72,12 @@ and restarting the server revokes the old credentials. See [MDN's authentication
 
 ## Watching
 
+If the primary feed is missing a game or buffering, choose **BinTV (backup)** from the provider
+dropdown under **Find your match**. Choose Arsenal, All football, or NBA, then click **Watch** on
+the game you want. You can browse the backup schedule while your current video plays. Switching
+the dropdown back to **All providers** restores the primary schedule. BinTV is fetched only when
+requested and coverage varies by game.
+
 The home page shows the schedule first. Select Arsenal, All football, or NBA, choose Watch on a
 match card to reveal the player, and select a source. StreamFree's listing feed supplies both soccer
 and basketball; basketball games appear in the NBA tab. The Streamed basketball adapter remains,
@@ -80,10 +86,31 @@ homepage. Source lookup has a 20-second request limit, with a live countdown whi
 followed by video loading. Use the native play/fullscreen/volume controls.
 Reload obtains a fresh media URL; Next source tries a different provider source. The provider and
 selected source remain visible in the Watch Room. Stop ends playback in the viewing browser.
-Playback uses adaptive quality and starts from hls.js's bandwidth estimate. The player targets
-10 segments behind the live edge and up to 120 seconds of forward buffer, subject to the source's
-playlist window and browser memory limits. It catches up if the delay exceeds 20 segments. Actual
-delay depends on segment duration; these settings favor smooth playback over staying close to live.
+With hls.js, the default playback target is 2 minutes 30 seconds behind the provider, with
+a catch-up threshold of 3 minutes. Short live playlists bring the target closer to live.
+Playback starts as soon as there is playable video and downloads ahead, with a default
+forward buffer target of 3 minutes. Native HLS fallback uses the browser's buffering policy.
+
+### Adjust playback buffering
+
+Add or update the settings from [the commented playback example](deploy/playback.env.example)
+in the file for your deployment. Missing settings use the defaults shown in the example.
+
+| Deployment | Settings file |
+| --- | --- |
+| Ubuntu systemd | `/etc/matchday.env` |
+| AlmaLinux Podman | `~/.config/matchday/matchday.env` |
+| MacBook Air | `~/Library/Application Support/Matchday/matchday.env` |
+| Local terminal | `.env` in the checkout |
+
+Restart the service after editing, then reopen the stream. For a local terminal run, create
+`.env` from the example if needed and pass it explicitly:
+
+```sh
+MATCHDAY_AUTH_ENABLED=false uv run --env-file .env uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+If an invalid value prevents startup, the service log names the setting to fix.
 
 The app does not load third-party player scripts, overlays, or popup code in your browser. An
 unsupported source displays an error; it never falls back to an embedded ad player. The explicitly

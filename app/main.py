@@ -13,14 +13,16 @@ from fastapi.staticfiles import StaticFiles
 
 from app.auth import Credentials, access_error, auth_enabled_from_environment
 from app.media import MediaService
-from app.providers import NAMES, PROVIDERS, failure, load_provider, resolve
+from app.playback import playback_settings_from_environment
+from app.providers import NAMES, PRIMARY_PROVIDERS, PROVIDERS, failure, load_provider, resolve
 
 STATIC = Path(__file__).parent / "static"
 
 
 class Catalog:
-    def __init__(self, client):
+    def __init__(self, client, providers=PRIMARY_PROVIDERS):
         self.client = client
+        self.providers = tuple(providers)
         self.lock = asyncio.Lock()
         self.expires = 0
         self.snapshot = None
@@ -33,11 +35,11 @@ class Catalog:
             if self.snapshot is not None and time.monotonic() < self.expires:
                 return self.snapshot
             results = await asyncio.gather(
-                *(load_provider(self.client, name) for name in PROVIDERS),
+                *(load_provider(self.client, name) for name in self.providers),
                 return_exceptions=True,
             )
             matches, statuses = [], []
-            for name, result in zip(PROVIDERS, results):
+            for name, result in zip(self.providers, results):
                 error = failure(result) if isinstance(result, Exception) else None
                 rows = [] if error else result
                 matches.extend(rows)
@@ -80,6 +82,7 @@ class Catalog:
 
 @asynccontextmanager
 async def lifespan(app):
+    app.state.playback_settings = playback_settings_from_environment()
     app.state.auth_enabled = auth_enabled_from_environment()
     app.state.credentials = Credentials.from_environment() if app.state.auth_enabled else None
     async with httpx.AsyncClient(
@@ -89,6 +92,7 @@ async def lifespan(app):
         limits=httpx.Limits(max_connections=20),
     ) as client:
         app.state.catalog = Catalog(client)
+        app.state.backup_catalog = Catalog(client, ("bintv",))
         app.state.media = MediaService()
         try:
             yield
@@ -127,25 +131,30 @@ async def health():
     return JSONResponse({"status": "ok"}, headers={"Cache-Control": "no-store"})
 
 
+def catalog_for(request, backup):
+    return request.app.state.backup_catalog if backup else request.app.state.catalog
+
+
 @app.get("/api/matches")
-async def matches(request: Request):
-    return await request.app.state.catalog.listing()
+async def matches(request: Request, backup: bool = False):
+    return await catalog_for(request, backup).listing()
 
 
 @app.get("/api/matches/{match_id}/streams")
-async def streams(match_id: str, request: Request):
-    return await request.app.state.catalog.streams(match_id)
+async def streams(match_id: str, request: Request, backup: bool = False):
+    return await catalog_for(request, backup).streams(match_id)
 
 
 @app.post("/api/matches/{match_id}/play/{source_id}")
-async def play(match_id: str, source_id: str, request: Request):
+async def play(match_id: str, source_id: str, request: Request, backup: bool = False):
     try:
         async with asyncio.timeout(20):
-            data = await request.app.state.catalog.streams(match_id)
+            data = await catalog_for(request, backup).streams(match_id)
             source = next((item for item in data["streams"] if item["id"] == source_id), None)
             if not source:
                 raise HTTPException(404, "Source changed. Refresh the match.")
-            return await request.app.state.media.start(source)
+            playback = await request.app.state.media.start(source)
+            return {**playback, "playback_settings": request.app.state.playback_settings}
     except TimeoutError as exc:
         raise HTTPException(
             504, "Video did not become available within 20 seconds. Try another source."

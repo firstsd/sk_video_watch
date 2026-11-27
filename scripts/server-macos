@@ -36,6 +36,8 @@ if [[ "$action" == serve ]]; then
       ''|'#'*) ;;
       MATCHDAY_HOST=*|MATCHDAY_PORT=*|MATCHDAY_AUTH_ENABLED=*|MATCHDAY_USERNAME=*|MATCHDAY_PASSWORD=*)
         export "$line" ;;
+      MATCHDAY_LIVE_TARGET_SECONDS=*|MATCHDAY_LIVE_MAX_SECONDS=*|MATCHDAY_FORWARD_BUFFER_SECONDS=*|MATCHDAY_BACK_BUFFER_SECONDS=*)
+        export "$line" ;;
       *) die "Invalid setting in $settings. Use one MATCHDAY key=value per line." ;;
     esac
   done < "$settings"
